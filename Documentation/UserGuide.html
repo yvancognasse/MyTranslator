@@ -53,8 +53,13 @@
       <li><strong>A result was not inserted:</strong> select editable text. Read-only selections display a result window instead. The app also avoids replacing a selection when an improvement changes the original language.</li>
     </ul>
 
+    <h2>Reliable translation and replacement</h2>
+    <p>The translation timeout includes sending the selected text to the local translator, waiting for its result, and collecting output. A stalled translator is stopped so another operation can be attempted.</p>
+    <p>Automatic replacement requires the original app, focused text element, selection position and selected text to remain unchanged. If you switch windows, change the selection, or the app does not expose a verifiable selection, MyTranslator shows the result window instead. Copy the result there and paste it where needed.</p>
+    <p>Rebuilding prepares and verifies a separate bundle before replacing the app. If compilation or signing fails, the previous app remains available.</p>
     <h2>What's new in this build</h2>
     <ul>
+      <li>The translation deadline now covers input delivery as well as processing. Automatic paste checks the original app, text element and selection; an uncertain destination opens the result window instead.</li>
       <li>About MyTranslator now shows the latest build date in parentheses beside the build number, formatted in the saved Primary language.</li>
       <li>The main window now places the gray Quit button between Settings and the blue Hide button. Quit closes the application completely; Hide still only minimizes the window.</li>
       <li>Settings immediately lists all 22 distinct Apple Translation languages on this Mac, grouping regional variants into one entry per language.</li>

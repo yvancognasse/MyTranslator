@@ -1769,8 +1769,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
 
         var saved = ""
+        var sourcePID: pid_t?
+        var sourceElement: AXUIElement?
+        var sourceRange: NSRange?
         DispatchQueue.main.sync {
             saved = NSPasteboard.general.string(forType: .string) ?? ""
+            sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            sourceElement = focusedAXElement()
+            sourceRange = sourceElement.flatMap { selectedRange(from: $0) }
         }
 
         DispatchQueue.main.sync {
@@ -1797,12 +1803,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             return
         }
 
+        var pasted = false
         DispatchQueue.main.sync {
+            let currentElement = focusedAXElement()
+            let sameElement: Bool
+            if let sourceElement, let currentElement {
+                sameElement = CFEqual(sourceElement, currentElement)
+            } else { sameElement = false }
+            let currentSelection = currentElement.flatMap { stringAttribute(kAXSelectedTextAttribute, from: $0) }
+            guard TextReplacementSafety.canReplace(
+                sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                sameElement: sameElement, original: selected, selected: currentSelection,
+                originalRange: sourceRange, currentRange: currentElement.flatMap { selectedRange(from: $0) }) else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(transformed, forType: .string)
+            postKey(9, flags: .maskCommand)
+            pasted = true
         }
-        Thread.sleep(forTimeInterval: 0.05)
-        postKey(9, flags: .maskCommand)
+        guard pasted else {
+            restore(saved)
+            showTranslationOverlay(transformed, sourceText: selected, action: action)
+            return
+        }
         Thread.sleep(forTimeInterval: 0.55)
 
         let focusedElementContainsTranslatedText = focusedElementContainsText(transformed)
@@ -1888,6 +1910,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             }
             return selectedText.trimmingCharacters(in: .whitespacesAndNewlines) == expected
         }
+    }
+
+    func selectedRange(from element: AXUIElement) -> NSRange? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        let rangeValue = value as! AXValue
+        guard AXValueGetType(rangeValue) == .cfRange else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue, .cfRange, &range), range.location >= 0, range.length >= 0 else { return nil }
+        return NSRange(location: range.location, length: range.length)
     }
 
     func focusedAXElement() -> AXUIElement? {
@@ -2066,88 +2099,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             return nil
         }
 
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [runner]
         var environment = ProcessInfo.processInfo.environment
         environment["MYTRANSLATOR_SOURCE_LANGUAGE"] = configLanguageCode("MYTRANSLATOR_SOURCE_LANGUAGE")
         environment["MYTRANSLATOR_TARGET_LANGUAGE"] = configLanguageCode("MYTRANSLATOR_TARGET_LANGUAGE")
-        environment["MYTRANSLATOR_TIMEOUT_SECONDS"] = String(configTimeoutSeconds())
-        p.environment = environment
-
-        let inPipe = Pipe()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        p.standardInput = inPipe
-        p.standardOutput = outPipe
-        p.standardError = errPipe
+        let timeoutSeconds = configTimeoutSeconds()
+        environment["MYTRANSLATOR_TIMEOUT_SECONDS"] = String(timeoutSeconds)
 
         do {
-            let ioQueue = DispatchQueue(label: "com.user.mytranslator.process-output")
-            let outputClosed = DispatchGroup()
-            outputClosed.enter()
-            outputClosed.enter()
-            var outData = Data()
-            var errData = Data()
+            let captured = try TranslationProcess.run(
+                executable: URL(fileURLWithPath: "/bin/bash"), arguments: [runner],
+                environment: environment, input: Data(text.utf8), timeout: TimeInterval(timeoutSeconds))
+            let result = String(data: captured.output, encoding: .utf8) ?? ""
+            let errText = String(data: captured.errors, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            outPipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                guard !data.isEmpty else {
-                    handle.readabilityHandler = nil
-                    outputClosed.leave()
-                    return
-                }
-                ioQueue.sync {
-                    outData.append(data)
-                }
-            }
-
-            errPipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                guard !data.isEmpty else {
-                    handle.readabilityHandler = nil
-                    outputClosed.leave()
-                    return
-                }
-                ioQueue.sync {
-                    errData.append(data)
-                }
-            }
-
-            try p.run()
-            if let data = text.data(using: .utf8) {
-                inPipe.fileHandleForWriting.write(data)
-            }
-            inPipe.fileHandleForWriting.closeFile()
-
-            let finished = DispatchSemaphore(value: 0)
-            DispatchQueue.global(qos: .utility).async {
-                p.waitUntilExit()
-                finished.signal()
-            }
-
-            let timeoutSeconds = configTimeoutSeconds()
-            if finished.wait(timeout: .now() + TimeInterval(timeoutSeconds)) == .timedOut {
-                p.terminate()
-                if finished.wait(timeout: .now() + 2) == .timedOut, p.isRunning {
-                    _ = kill(p.processIdentifier, SIGKILL)
-                    _ = finished.wait(timeout: .now() + 2)
-                }
-                _ = outputClosed.wait(timeout: .now() + 2)
-                outPipe.fileHandleForReading.readabilityHandler = nil
-                errPipe.fileHandleForReading.readabilityHandler = nil
-                showTranslatorError("\(l("Apple Translation timed out after")) \(timeoutSeconds) \(l("seconds"))")
-                return nil
-            }
-
-            _ = outputClosed.wait(timeout: .now() + 2)
-
-            let captured = ioQueue.sync { (outData, errData) }
-            let result = String(data: captured.0, encoding: .utf8) ?? ""
-            let errText = String(data: captured.1, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            guard p.terminationStatus == 0 else {
-                let rawDetails = errText.isEmpty ? "exit code \(p.terminationStatus)" : errText
+            guard captured.status == 0 else {
+                let rawDetails = errText.isEmpty ? "exit code \(captured.status)" : errText
                 let details = friendlyTranslationError(rawDetails)
                 showTranslatorError(details)
                 return nil
@@ -2161,6 +2127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             }
             didShowTranslatorError = false
             return result
+        } catch TranslationProcess.Failure.timedOut {
+            showTranslatorError("\(l("Apple Translation timed out after")) \(timeoutSeconds) \(l("seconds"))")
+            return nil
         } catch {
             showTranslatorError(l("Unable to launch the local translator."))
             return nil

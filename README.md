@@ -15,3 +15,12 @@ git add .
 git commit -m "Describe the change"
 git push origin main
 ```
+
+## Stability checks
+
+```sh
+swiftc -parse-as-library Sources/TranslationProcess.swift Tests/StabilityTests.swift -o /tmp/mytranslator-stability-tests
+/tmp/mytranslator-stability-tests
+```
+
+The tests use synthetic text and child processes; they do not access the clipboard or translate private content. Builds retain the previous app until compilation and signing succeed.

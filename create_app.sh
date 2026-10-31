@@ -5,7 +5,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_PATH="$SCRIPT_DIR/MyTranslator.app"
+FINAL_APP_PATH="$SCRIPT_DIR/MyTranslator.app"
+mkdir -p "$SCRIPT_DIR/.build"
+STAGING_DIR="$(mktemp -d "$SCRIPT_DIR/.build/package.XXXXXX")"
+APP_PATH="$STAGING_DIR/MyTranslator.app"
 LOGO_PNG="$SCRIPT_DIR/MyTranslator.png"
 BUSY_ICON_PNG="$SCRIPT_DIR/IconProposal/Translation-In-Progress-Concept.png"
 LOCALIZATIONS_JSON="$SCRIPT_DIR/Resources/InterfaceLocalizations.json"
@@ -30,7 +33,7 @@ printf '\n'
 
 command -v swiftc >/dev/null 2>&1 || { echo "❌ swiftc introuvable : installez Xcode Command Line Tools (xcode-select --install)"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "❌ python3 introuvable"; exit 1; }
-if [ ! -s "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/MyTranslatorApp.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/UILocalization.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/LocalTranslator.swift" -nt "$USER_GUIDE_HTML" ] || [ "$LOCALIZATIONS_JSON" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/create_app.sh" -nt "$USER_GUIDE_HTML" ]; then
+if [ ! -s "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/MyTranslatorApp.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/UILocalization.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/LocalTranslator.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/TranslationProcess.swift" -nt "$USER_GUIDE_HTML" ] || [ "$LOCALIZATIONS_JSON" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/create_app.sh" -nt "$USER_GUIDE_HTML" ]; then
     echo "❌ Mettez à jour Documentation/UserGuide.html après chaque modification du code avant de reconstruire l’app." >&2
     exit 1
 fi
@@ -65,12 +68,12 @@ BUILD_NUMBER="$((BUILD_NUMBER + 1))"
 APP_VERSION="1.$BUILD_NUMBER"
 LAST_COMPILED="$(date '+%b %e, %Y at %l:%M %p' | sed 's/  / /g')"
 BUILD_DATE="$(date '+%Y-%m-%d')"
-printf '%s\n' "$BUILD_NUMBER" > "$VERSION_FILE"
+
 
 echo "→ $(swiftc --version 2>&1 | head -1)"
 echo "→ Build : $BUILD_NUMBER"
 echo "→ Dossier projet : $SCRIPT_DIR"
-echo "→ Nettoyage ancien bundle"
+echo "→ Préparation du nouveau bundle (ancienne application conservée)"
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
@@ -204,7 +207,7 @@ if [ ! -f "$SWIFT_SRC" ]; then
 fi
 
 echo "→ Compilation Swift..."
-swiftc -module-cache-path "$BUILD_TMP_DIR/clang-cache" -framework Cocoa -framework Carbon -framework AVFoundation -framework FoundationModels -O "$SWIFT_SRC" "$SCRIPT_DIR/Sources/UILocalization.swift" -o "$APP_PATH/Contents/MacOS/MyTranslator"
+swiftc -module-cache-path "$BUILD_TMP_DIR/clang-cache" -framework Cocoa -framework Carbon -framework AVFoundation -framework FoundationModels -O "$SWIFT_SRC" "$SCRIPT_DIR/Sources/UILocalization.swift" "$SCRIPT_DIR/Sources/TranslationProcess.swift" -o "$APP_PATH/Contents/MacOS/MyTranslator"
 echo "   ✓ Binaire compilé"
 
 cat > "$APP_PATH/Contents/Info.plist" <<PLIST
@@ -250,6 +253,14 @@ fi
 
 echo
 
+if [ -d "$FINAL_APP_PATH" ]; then
+    mv "$FINAL_APP_PATH" "$STAGING_DIR/Previous-MyTranslator.app"
+fi
+if ! mv "$APP_PATH" "$FINAL_APP_PATH"; then
+    [ ! -d "$STAGING_DIR/Previous-MyTranslator.app" ] || mv "$STAGING_DIR/Previous-MyTranslator.app" "$FINAL_APP_PATH"
+    exit 1
+fi
+printf '%s\n' "$BUILD_NUMBER" > "$VERSION_FILE"
 echo "✅ MyTranslator.app créée dans : $SCRIPT_DIR"
 echo "→ Build : $BUILD_NUMBER"
 echo "→ Dernière compilation : $LAST_COMPILED"
