@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyTranslator User Guide</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { max-width: 760px; margin: 0 auto; padding: 32px 24px 80px; color: CanvasText; background: Canvas; }
+    h1, h2 { line-height: 1.2; letter-spacing: -.02em; }
+    h1 { margin: 0 0 8px; font-size: 2rem; }
+    h2 { margin-top: 2.2rem; font-size: 1.3rem; }
+    p, li { max-width: 68ch; }
+    .intro { color: GrayText; margin-top: 0; }
+    .note { border-left: 3px solid #0a84ff; padding: 10px 16px; background: color-mix(in srgb, #0a84ff 8%, Canvas); border-radius: 0 8px 8px 0; }
+    kbd { font: inherit; font-size: .9em; border: 1px solid GrayText; border-radius: 5px; padding: 1px 5px; white-space: nowrap; }
+    a { color: #0a84ff; }
+    footer { margin-top: 3rem; color: GrayText; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MyTranslator User Guide</h1>
+    <p class="intro">Build {{BUILD_NUMBER}} · Offline translation and text improvement on macOS</p>
+
+    <h2>Quick start</h2>
+    <ol>
+      <li>Open <strong>Settings</strong> and choose a <strong>Primary</strong> language and an <strong>Other language</strong>.</li>
+      <li>Select text in any app, then press <kbd>Control</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to translate it or <kbd>Control</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> to improve its wording. These are the initial shortcuts; you can change them in Settings.</li>
+      <li>When the selected text is editable, MyTranslator replaces the selection. For read-only text, it shows the result in a separate window with <strong>Listen</strong>, <strong>Copy</strong>, and <strong>Close</strong> buttons.</li>
+    </ol>
+    <p class="note">MyTranslator needs macOS Accessibility permission to read the selection and replace editable text. Grant it in System Settings → Privacy &amp; Security → Accessibility.</p>
+
+    <h2>Languages and interface</h2>
+    <p>The Primary language is the usual translation destination. If the selected text is already in that language, MyTranslator translates it into the Other language. The app's windows, menus, buttons, tooltips, and app messages use the saved Primary language. The guide stays in English and is available from the app's Help menu.</p>
+    <p>The two language lists show the 22 distinct languages supported by Apple Translation on this Mac. Regional variants are grouped, including Chinese as one entry. The languages are Arabic, Chinese, Danish, Dutch, English, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Norwegian Bokmål, Polish, Portuguese, Russian, Spanish, Swedish, Thai, Turkish, Ukrainian, and Vietnamese.</p>
+    <p>Some languages still need an offline pack. The Languages information panel explains this requirement. Open Apple's Translate app and download a language before using it in MyTranslator, then reopen Settings. On this Mac, Arabic, Hindi, Indonesian, Polish, Russian, Thai, and Ukrainian currently need a download. The actual installed packs can change over time.</p>
+
+    <h2>Settings</h2>
+    <p>Choose the two languages, record the Improve and Translate shortcuts by clicking their fields, and set the maximum wait time (3–300 seconds). Click <strong>Save</strong> to apply the changes immediately. Click <strong>Cancel</strong> to leave them unchanged. The information button beside Languages explains how to download offline language packs.</p>
+    <p>The main window has three compact buttons, from left to right: Settings, Quit, and Hide. Hide minimizes the window while MyTranslator continues running; reopen it from the Dock. Quit ends the app completely, just like Quit MyTranslator in the app menu. Closing a window keeps the app running. In Settings, Save applies changes and Cancel discards them.</p>
+    <p>Choose About MyTranslator from the app menu to see the build number followed by the date of the most recent build in parentheses. The date uses the saved Primary language.</p>
+
+    <h2>Results and privacy</h2>
+    <p>The result window lets you listen to a result, copy all its text, or close the window. The app shows progress by changing its Dock icon while it works. Translation uses Apple's local Translation framework and downloaded languages. Improve uses Apple Foundation Models on supported Macs. The selected text is processed on the Mac by these system frameworks.</p>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+      <li><strong>A shortcut does nothing:</strong> check Accessibility permission and make sure another app or macOS has not taken the same shortcut. Change it in Settings if needed.</li>
+      <li><strong>A language is missing:</strong> download it in Apple's Translate app, then reopen Settings.</li>
+      <li><strong>Translation times out:</strong> try again or increase the maximum wait time in Settings.</li>
+      <li><strong>Improve is unavailable:</strong> check that Apple Foundation Models is available on this Mac.</li>
+      <li><strong>A result was not inserted:</strong> select editable text. Read-only selections display a result window instead. The app also avoids replacing a selection when an improvement changes the original language.</li>
+    </ul>
+
+    <h2>What's new in this build</h2>
+    <ul>
+      <li>About MyTranslator now shows the latest build date in parentheses beside the build number, formatted in the saved Primary language.</li>
+      <li>The main window now places the gray Quit button between Settings and the blue Hide button. Quit closes the application completely; Hide still only minimizes the window.</li>
+      <li>Settings immediately lists all 22 distinct Apple Translation languages on this Mac, grouping regional variants into one entry per language.</li>
+      <li>The app interface follows the saved Primary language across the main window, Settings, result window, menus, and messages, including the seven newly listed languages. Reopening Settings refreshes its language.</li>
+      <li>The Help menu opens this bundled English guide without needing an internet connection.</li>
+      <li>The build checks that app text has a translation for each supported interface language and that this guide was updated after source, localization, or build-script changes. Button labels adapt to longer translations.</li>
+    </ul>
+  </main>
+  <footer>MyTranslator · User Guide · Build {{BUILD_NUMBER}}</footer>
+</body>
+</html>
