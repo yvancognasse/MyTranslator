@@ -55,10 +55,11 @@
 
     <h2>Reliable translation and replacement</h2>
     <p>The translation timeout includes sending the selected text to the local translator, waiting for its result, and collecting output. A stalled translator is stopped so another operation can be attempted.</p>
-    <p>Automatic replacement requires the original app, focused text element, selection position and selected text to remain unchanged. If you switch windows, change the selection, or the app does not expose a verifiable selection, MyTranslator shows the result window instead. Copy the result there and paste it where needed.</p>
+    <p>Automatic replacement checks that the original app, focused editable text element and selected text remain unchanged. Selection positions are also compared when the editor provides them. For editors that do not expose the selected text or its position through Accessibility, MyTranslator verifies the selection with a fresh copy before pasting. If the destination changes or the selection cannot be verified, MyTranslator shows the result window instead. Copy the result there and paste it where needed.</p>
     <p>Rebuilding prepares and verifies a separate bundle before replacing the app. If compilation or signing fails, the previous app remains available.</p>
     <h2>What's new in this build</h2>
     <ul>
+      <li>Fixed editable selections opening the result window instead of being replaced when an editor omits Accessibility selection metadata. A fresh copy now verifies these selections before automatic paste.</li>
       <li>The translation deadline now covers input delivery as well as processing. Automatic paste checks the original app, text element and selection; an uncertain destination opens the result window instead.</li>
       <li>About MyTranslator now shows the latest build date in parentheses beside the build number, formatted in the saved Primary language.</li>
       <li>The main window now places the gray Quit button between Settings and the blue Hide button. Quit closes the application completely; Hide still only minimizes the window.</li>

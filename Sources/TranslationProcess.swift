@@ -78,13 +78,25 @@ enum TranslationProcess {
     }
 }
 
-// Failure to establish the original selection must never authorize a paste.
+// Keep app/element identity checks even when an editor omits AX selection metadata.
 enum TextReplacementSafety {
     static func canReplace(sourcePID: Int32?, currentPID: Int32?, sameElement: Bool,
                            original: String, selected: String?,
-                           originalRange: NSRange?, currentRange: NSRange?) -> Bool {
+                           originalRange: NSRange?, currentRange: NSRange?,
+                           copiedSelection: String? = nil) -> Bool {
         guard let sourcePID, sourcePID == currentPID, sameElement,
-              !original.isEmpty, let selected, let originalRange, let currentRange else { return false }
-        return original == selected && originalRange == currentRange
+              !original.isEmpty else { return false }
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        }
+        if let selected, normalized(original) != normalized(selected) { return false }
+        if let originalRange, let currentRange {
+            guard originalRange == currentRange else { return false }
+            if selected != nil { return true }
+        }
+        // A fresh successful copy is required whenever AX metadata is incomplete.
+        guard let copiedSelection else { return false }
+        return normalized(original) == normalized(copiedSelection)
     }
 }

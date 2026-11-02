@@ -44,6 +44,27 @@ struct StabilityTests {
             currentRange: NSRange(location: 20, length: 4)))
         precondition(!TextReplacementSafety.canReplace(sourcePID: 10, currentPID: 10, sameElement: true,
             original: "word", selected: "word", originalRange: nil, currentRange: nil))
-        print("PASS: large input/output, concurrent stderr, stalled stdin timeout, nonzero exit, broken pipe, selection identity guards")
+        func fallback(_ selected: String?, _ copied: String?,
+                      _ originalRange: NSRange? = nil, _ currentRange: NSRange? = nil,
+                      pid: Int32 = 10, same: Bool = true) -> Bool {
+            TextReplacementSafety.canReplace(sourcePID: 10, currentPID: pid, sameElement: same,
+                original: "word", selected: selected, originalRange: originalRange,
+                currentRange: currentRange, copiedSelection: copied)
+        }
+        precondition(fallback("word", "word")) // Editor without AX ranges.
+        precondition(fallback(nil, "word")) // Editor with clipboard-only selection access.
+        precondition(!fallback(nil, nil)) // Failed verification copy.
+        precondition(!fallback(nil, "changed"))
+        precondition(!fallback("changed", "word"))
+        precondition(!fallback(nil, "word", pid: 11))
+        precondition(!fallback(nil, "word", same: false))
+        precondition(!fallback("word", "word", NSRange(location: 0, length: 4),
+                               NSRange(location: 20, length: 4)))
+        precondition(fallback(nil, "word", NSRange(location: 0, length: 4),
+                              NSRange(location: 0, length: 4)))
+        precondition(TextReplacementSafety.canReplace(sourcePID: 10, currentPID: 10,
+            sameElement: true, original: "one\r\ntwo", selected: "one\ntwo",
+            originalRange: nil, currentRange: nil, copiedSelection: "one\ntwo"))
+        print("PASS: large input/output, concurrent stderr, stalled stdin timeout, nonzero exit, broken pipe, selection identity guards, clipboard selection fallback")
     }
 }

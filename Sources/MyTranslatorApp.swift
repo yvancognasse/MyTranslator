@@ -1803,18 +1803,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             return
         }
 
+        // Some editors expose selected text but no range; others only support Cmd+C.
+        // Re-copy in those cases instead of treating incomplete AX support as read-only.
+        func destinationIsUnchanged(_ currentElement: AXUIElement?) -> Bool {
+            guard let sourcePID, sourcePID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                  let sourceElement, let currentElement,
+                  CFEqual(sourceElement, currentElement),
+                  elementAllowsTextInsertion(currentElement) else { return false }
+            if let sourceRange, let currentRange = selectedRange(from: currentElement) {
+                return sourceRange == currentRange
+            }
+            return true
+        }
+        var copiedSelection: String?
+        var shouldVerifyByCopy = false
+        let selectionSentinel = "__MYTRANSLATOR_SELECTION_\(UUID().uuidString)__"
+        DispatchQueue.main.sync {
+            let currentElement = focusedAXElement()
+            guard destinationIsUnchanged(currentElement), let currentElement else { return }
+            shouldVerifyByCopy = sourceRange == nil || selectedRange(from: currentElement) == nil
+                || stringAttribute(kAXSelectedTextAttribute, from: currentElement) == nil
+            if shouldVerifyByCopy {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(selectionSentinel, forType: .string)
+                postKey(8, flags: .maskCommand)
+            }
+        }
+        if shouldVerifyByCopy {
+            Thread.sleep(forTimeInterval: 0.35)
+            DispatchQueue.main.sync {
+                if let text = NSPasteboard.general.string(forType: .string), text != selectionSentinel {
+                    copiedSelection = text
+                }
+            }
+        }
+
         var pasted = false
         DispatchQueue.main.sync {
             let currentElement = focusedAXElement()
-            let sameElement: Bool
-            if let sourceElement, let currentElement {
-                sameElement = CFEqual(sourceElement, currentElement)
-            } else { sameElement = false }
-            let currentSelection = currentElement.flatMap { stringAttribute(kAXSelectedTextAttribute, from: $0) }
+            guard destinationIsUnchanged(currentElement), let currentElement else { return }
+            let currentSelection = stringAttribute(kAXSelectedTextAttribute, from: currentElement)
             guard TextReplacementSafety.canReplace(
                 sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                sameElement: sameElement, original: selected, selected: currentSelection,
-                originalRange: sourceRange, currentRange: currentElement.flatMap { selectedRange(from: $0) }) else { return }
+                sameElement: true, original: selected, selected: currentSelection,
+                originalRange: sourceRange, currentRange: selectedRange(from: currentElement),
+                copiedSelection: copiedSelection) else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(transformed, forType: .string)
             postKey(9, flags: .maskCommand)
@@ -1955,8 +1988,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
                 return true
             }
 
+            var selectedTextSettable = DarwinBoolean(false)
+            if AXUIElementIsAttributeSettable(
+                element, kAXSelectedTextAttribute as CFString, &selectedTextSettable
+            ) == .success, selectedTextSettable.boolValue {
+                return true
+            }
+
             if let role = stringAttribute(kAXRoleAttribute, from: element),
-               role == "AXTextField" || role == "AXComboBox" {
+               role == "AXTextField" || role == "AXTextArea" || role == "AXComboBox" {
                 return true
             }
 
