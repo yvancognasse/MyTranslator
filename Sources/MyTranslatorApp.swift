@@ -1753,196 +1753,163 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
     }
 
+    // Runs on the serial translation queue. All AppKit/AX access stays on main.
     func handleTextAction(_ action: TextAction) {
-        func normalizedClipboardText(_ text: String) -> String {
-            text
-                .replacingOccurrences(of: "\r\n", with: "\n")
-                .replacingOccurrences(of: "\r", with: "\n")
-        }
-
         setTranslationInProgress(true)
         DispatchQueue.main.async {
             self.translationProgressLabel?.stringValue = self.l(action.progressTitle)
         }
-        defer {
-            setTranslationInProgress(false)
-        }
+        defer { setTranslationInProgress(false) }
 
-        var saved = ""
         var sourcePID: pid_t?
         var sourceElement: AXUIElement?
         var sourceRange: NSRange?
+        var savedItems = [[NSPasteboard.PasteboardType: Data]]()
+        var ownedChangeCount: Int?
         DispatchQueue.main.sync {
-            saved = NSPasteboard.general.string(forType: .string) ?? ""
             sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
             sourceElement = focusedAXElement()
             sourceRange = sourceElement.flatMap { selectedRange(from: $0) }
+            savedItems = (NSPasteboard.general.pasteboardItems ?? []).map { item in
+                var data = [NSPasteboard.PasteboardType: Data]()
+                for type in item.types { data[type] = item.data(forType: type) }
+                return data
+            }
+        }
+        // Never restore on a timer: that can overwrite the next operation or a user copy.
+        defer {
+            DispatchQueue.main.sync {
+                let board = NSPasteboard.general
+                guard let ownedChangeCount, board.changeCount == ownedChangeCount else { return }
+                board.clearContents()
+                let items = savedItems.map { saved -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    for (type, data) in saved { item.setData(data, forType: type) }
+                    return item
+                }
+                if !items.isEmpty { board.writeObjects(items) }
+            }
         }
 
-        DispatchQueue.main.sync {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("__MYTRANSLATOR_SENTINEL__", forType: .string)
-        }
-        Thread.sleep(forTimeInterval: 0.05)
-
-        postKey(8, flags: .maskCommand)
-        Thread.sleep(forTimeInterval: 0.35)
-
-        var selected = ""
-        DispatchQueue.main.sync {
-            selected = NSPasteboard.general.string(forType: .string) ?? ""
-        }
-
-        guard !selected.isEmpty, selected != "__MYTRANSLATOR_SENTINEL__" else {
-            restore(saved)
-            return
-        }
-
-        guard let transformed = transformSelectedText(selected, action: action) else {
-            restore(saved)
-            return
-        }
-
-        // Some editors expose selected text but no range; others only support Cmd+C.
-        // Re-copy in those cases instead of treating incomplete AX support as read-only.
-        func destinationIsUnchanged(_ currentElement: AXUIElement?) -> Bool {
+        func destinationIsUnchanged(_ current: AXUIElement?, editable: Bool = false) -> Bool {
             guard let sourcePID, sourcePID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                  let sourceElement, let currentElement,
-                  CFEqual(sourceElement, currentElement),
-                  elementAllowsTextInsertion(currentElement) else { return false }
-            if let sourceRange, let currentRange = selectedRange(from: currentElement) {
-                return sourceRange == currentRange
+                  let sourceElement, let current, CFEqual(sourceElement, current) else { return false }
+            if editable && !elementAllowsTextInsertion(current) { return false }
+            if let sourceRange, let range = selectedRange(from: current), sourceRange != range { return false }
+            return true
+        }
+        func writeClipboard(_ text: String) {
+            let board = NSPasteboard.general
+            board.clearContents()
+            board.setString(text, forType: .string)
+            ownedChangeCount = board.changeCount
+        }
+        // Held shortcut modifiers can turn Cmd+C/V into another command in the target app.
+        func waitForShortcutRelease() -> Bool {
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+            while !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
+                Thread.sleep(forTimeInterval: 0.02)
             }
             return true
         }
-        var copiedSelection: String?
-        var shouldVerifyByCopy = false
-        let selectionSentinel = "__MYTRANSLATOR_SELECTION_\(UUID().uuidString)__"
-        DispatchQueue.main.sync {
-            let currentElement = focusedAXElement()
-            guard destinationIsUnchanged(currentElement), let currentElement else { return }
-            shouldVerifyByCopy = sourceRange == nil || selectedRange(from: currentElement) == nil
-                || stringAttribute(kAXSelectedTextAttribute, from: currentElement) == nil
-            if shouldVerifyByCopy {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(selectionSentinel, forType: .string)
-                postKey(8, flags: .maskCommand)
-            }
-        }
-        if shouldVerifyByCopy {
-            Thread.sleep(forTimeInterval: 0.35)
+        func copySelection() -> String? {
+            guard waitForShortcutRelease() else { return nil }
+            let sentinel = "__MYTRANSLATOR_COPY_\(UUID().uuidString)__"
+            var sent = false
             DispatchQueue.main.sync {
-                if let text = NSPasteboard.general.string(forType: .string), text != selectionSentinel {
-                    copiedSelection = text
+                guard destinationIsUnchanged(focusedAXElement()) else { return }
+                if let ownedChangeCount, NSPasteboard.general.changeCount != ownedChangeCount { return }
+                writeClipboard(sentinel)
+                postKey(8, flags: .maskCommand)
+                sent = true
+            }
+            guard sent else { return nil }
+            let deadline = ProcessInfo.processInfo.systemUptime + 2
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                Thread.sleep(forTimeInterval: 0.025)
+                var result: String?
+                var unchanged = false
+                DispatchQueue.main.sync {
+                    unchanged = destinationIsUnchanged(focusedAXElement())
+                    let board = NSPasteboard.general
+                    if unchanged, board.changeCount != ownedChangeCount,
+                       let text = board.string(forType: .string), text != sentinel, !text.isEmpty {
+                        result = text
+                        ownedChangeCount = board.changeCount
+                    }
                 }
+                if !unchanged { return nil }
+                if let result { return result }
+            }
+            return nil
+        }
+
+        guard let selected = copySelection(),
+              let transformed = transformSelectedText(selected, action: action) else { return }
+        if TextReplacementSafety.sameText(selected, transformed) { return }
+
+        // Always refresh the selection: some web editors report stale AXSelectedText.
+        let copiedSelection = copySelection()
+        var inserted = false
+        var pasteSent = false
+        var beforeValue: String?
+        if waitForShortcutRelease() {
+            DispatchQueue.main.sync {
+                guard let element = focusedAXElement(), destinationIsUnchanged(element, editable: true),
+                      TextReplacementSafety.canReplace(
+                        sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                        sameElement: true, original: selected,
+                        selected: nil,
+                        originalRange: sourceRange, currentRange: selectedRange(from: element),
+                        copiedSelection: copiedSelection), copiedSelection != nil,
+                      NSPasteboard.general.changeCount == ownedChangeCount else { return }
+                // Prefer the editor's replacement API when it explicitly supports it.
+                // Do not set AXValue: that would replace the whole document.
+                var settable = DarwinBoolean(false)
+                if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+                   settable.boolValue,
+                   AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString,
+                                                transformed as CFString) == .success {
+                    inserted = true
+                    return
+                }
+                beforeValue = stringAttribute(kAXValueAttribute, from: element)
+                writeClipboard(transformed)
+                postKey(9, flags: .maskCommand)
+                pasteSent = true
             }
         }
-
-        var pasted = false
-        DispatchQueue.main.sync {
-            let currentElement = focusedAXElement()
-            guard destinationIsUnchanged(currentElement), let currentElement else { return }
-            let currentSelection = stringAttribute(kAXSelectedTextAttribute, from: currentElement)
-            guard TextReplacementSafety.canReplace(
-                sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                sameElement: true, original: selected, selected: currentSelection,
-                originalRange: sourceRange, currentRange: selectedRange(from: currentElement),
-                copiedSelection: copiedSelection) else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(transformed, forType: .string)
-            postKey(9, flags: .maskCommand)
-            pasted = true
-        }
-        guard pasted else {
-            restore(saved)
-            showTranslationOverlay(transformed, sourceText: selected, action: action)
-            return
-        }
-        Thread.sleep(forTimeInterval: 0.55)
-
-        let focusedElementContainsTranslatedText = focusedElementContainsText(transformed)
-        if focusedElementContainsTranslatedText {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
-                self.restore(saved)
-            }
-            return
-        }
-
-        let accessibilitySelectionStillOriginal = focusedSelectedTextMatches(selected)
-
-        let verificationSentinel = "__MYTRANSLATOR_VERIFY_\(UUID().uuidString)__"
-        DispatchQueue.main.sync {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(verificationSentinel, forType: .string)
-        }
-        Thread.sleep(forTimeInterval: 0.05)
-        postKey(8, flags: .maskCommand)
-        Thread.sleep(forTimeInterval: 0.30)
-
-        var afterPasteSelection = ""
-        DispatchQueue.main.sync {
-            afterPasteSelection = NSPasteboard.general.string(forType: .string) ?? ""
-        }
-
-        let originalStillSelected =
-            normalizedClipboardText(afterPasteSelection) == normalizedClipboardText(selected)
-            && normalizedClipboardText(transformed) != normalizedClipboardText(selected)
-        let verificationCopyDidNotRun = afterPasteSelection == verificationSentinel
-        let pasteFailedWithOriginalStillSelected =
-            originalStillSelected || (verificationCopyDidNotRun && accessibilitySelectionStillOriginal)
-
-        if pasteFailedWithOriginalStillSelected {
-            restore(saved)
+        if inserted { return }
+        guard pasteSent else {
             showTranslationOverlay(transformed, sourceText: selected, action: action)
             return
         }
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
-            self.restore(saved)
-        }
-    }
-
-    func focusedElementAllowsTextInsertion() -> Bool {
-        guard let focusedElement = focusedAXElement() else {
-            return false
-        }
-        return elementAllowsTextInsertion(focusedElement)
-    }
-
-    func focusedElementContainsText(_ text: String) -> Bool {
-        guard !text.isEmpty, let focusedElement = focusedAXElement() else {
-            return false
-        }
-
-        let normalizedNeedle = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedNeedle.isEmpty else {
-            return false
-        }
-
-        return elementOrAncestor(focusedElement) { element in
-            guard let value = stringAttribute(kAXValueAttribute, from: element) else {
-                return false
+        // Keep the paste payload available while slow editors consume it. Never issue
+        // a verification Cmd+C here: it can replace the payload before Cmd+V reads it.
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+            var changedDestination = false
+            DispatchQueue.main.sync {
+                guard let sourcePID, sourcePID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                      let sourceElement, let current = focusedAXElement(), CFEqual(sourceElement, current) else {
+                    changedDestination = true
+                    return
+                }
+                inserted = TextReplacementSafety.confirmsReplacement(
+                    before: beforeValue, after: stringAttribute(kAXValueAttribute, from: current),
+                    range: sourceRange, replacement: transformed)
             }
-            return value.contains(normalizedNeedle)
+            if inserted { return }
+            if changedDestination { break }
         }
-    }
-
-    func focusedSelectedTextMatches(_ text: String) -> Bool {
-        guard !text.isEmpty, let focusedElement = focusedAXElement() else {
-            return false
-        }
-
-        let expected = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !expected.isEmpty else {
-            return false
-        }
-
-        return elementOrAncestor(focusedElement) { element in
-            guard let selectedText = stringAttribute(kAXSelectedTextAttribute, from: element) else {
-                return false
-            }
-            return selectedText.trimmingCharacters(in: .whitespacesAndNewlines) == expected
-        }
+        // For opaque editors keep the translation available for a late paste or manual
+        // recovery, rather than restoring the old clipboard before it has been consumed.
+        ownedChangeCount = nil
+        showTranslationOverlay(transformed, sourceText: selected, action: action)
     }
 
     func selectedRange(from element: AXUIElement) -> NSRange? {
@@ -2100,15 +2067,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         up?.flags = flags
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
-    }
-
-    func restore(_ text: String) {
-        DispatchQueue.main.async {
-            NSPasteboard.general.clearContents()
-            if !text.isEmpty {
-                NSPasteboard.general.setString(text, forType: .string)
-            }
-        }
     }
 
     func showTranslatorError(_ details: String) {

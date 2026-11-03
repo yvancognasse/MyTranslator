@@ -80,6 +80,21 @@ enum TranslationProcess {
 
 // Keep app/element identity checks even when an editor omits AX selection metadata.
 enum TextReplacementSafety {
+    static func sameText(_ lhs: String, _ rhs: String) -> Bool {
+        func normalize(_ text: String) -> String {
+            text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        }
+        return normalize(lhs) == normalize(rhs)
+    }
+
+    static func confirmsReplacement(before: String?, after: String?, range: NSRange?, replacement: String) -> Bool {
+        guard let before, let after, let range,
+              range.location != NSNotFound, range.location <= (before as NSString).length,
+              range.length <= (before as NSString).length - range.location else { return false }
+        let expected = (before as NSString).replacingCharacters(in: range, with: replacement)
+        return before != after && sameText(expected, after)
+    }
+
     static func canReplace(sourcePID: Int32?, currentPID: Int32?, sameElement: Bool,
                            original: String, selected: String?,
                            originalRange: NSRange?, currentRange: NSRange?,

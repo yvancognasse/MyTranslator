@@ -65,6 +65,23 @@ struct StabilityTests {
         precondition(TextReplacementSafety.canReplace(sourcePID: 10, currentPID: 10,
             sameElement: true, original: "one\r\ntwo", selected: "one\ntwo",
             originalRange: nil, currentRange: nil, copiedSelection: "one\ntwo"))
-        print("PASS: large input/output, concurrent stderr, stalled stdin timeout, nonzero exit, broken pipe, selection identity guards, clipboard selection fallback")
+        // Verify the exact replacement, including UTF-16 offsets used by Accessibility.
+        precondition(TextReplacementSafety.confirmsReplacement(before: "Hello world!", after: "Hello monde!",
+            range: NSRange(location: 6, length: 5), replacement: "monde"))
+        precondition(TextReplacementSafety.confirmsReplacement(before: "😀 world", after: "😀 monde",
+            range: NSRange(location: 3, length: 5), replacement: "monde"))
+        precondition(!TextReplacementSafety.confirmsReplacement(before: "monde world", after: "monde world",
+            range: NSRange(location: 6, length: 5), replacement: "monde")) // Existing translation is not success.
+        precondition(!TextReplacementSafety.confirmsReplacement(before: "Hello world!", after: "monde Hello world!",
+            range: NSRange(location: 6, length: 5), replacement: "monde")) // Inserted at wrong location.
+        precondition(!TextReplacementSafety.confirmsReplacement(before: nil, after: "monde",
+            range: nil, replacement: "monde")) // Missing metadata is not confirmation.
+        precondition(!TextReplacementSafety.confirmsReplacement(before: "hello", after: "monde",
+            range: NSRange(location: Int.max, length: 5), replacement: "monde"))
+        precondition(!TextReplacementSafety.confirmsReplacement(before: "hello", after: "monde",
+            range: NSRange(location: 0, length: Int.max), replacement: "monde"))
+        precondition(TextReplacementSafety.sameText("a\r\nb", "a\nb"))
+        precondition(!TextReplacementSafety.sameText(" word", "word"))
+        print("PASS: large input/output, concurrent stderr, stalled stdin timeout, nonzero exit, broken pipe, selection identity guards, clipboard selection fallback, exact replacement confirmation, Unicode offsets")
     }
 }
