@@ -80,6 +80,15 @@ enum TranslationProcess {
 
 // Keep app/element identity checks even when an editor omits AX selection metadata.
 enum TextReplacementSafety {
+    // Copy may work without AX focus; insertion always requires concrete identity.
+    static func sameDestination(sourcePID: Int32?, currentPID: Int32?,
+                                sourceHasElement: Bool, currentHasElement: Bool,
+                                sameElement: Bool, inserting: Bool) -> Bool {
+        guard let sourcePID, sourcePID == currentPID else { return false }
+        if sourceHasElement && currentHasElement { return sameElement }
+        return !inserting && !sourceHasElement && !currentHasElement
+    }
+
     static func sameText(_ lhs: String, _ rhs: String) -> Bool {
         func normalize(_ text: String) -> String {
             text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")

@@ -467,9 +467,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     private var hotKeyEventHandler: EventHandlerRef?
     private var polishHotKeyRef: EventHotKeyRef?
     private var translationHotKeyRef: EventHotKeyRef?
+    private var globalKeyMonitor: Any?
+    private var lastHotkeyTime: TimeInterval = -.infinity
 
     private let translationQueue = DispatchQueue(label: "com.user.mytranslator.translation")
     private var didShowTranslatorError = false
+    private var textActionRunning = false // Accessed only on the main thread.
 
     private var hotkey: Hotkey {
         parseHotkey(configValue("MYTRANSLATOR_HOTKEY"))
@@ -692,6 +695,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         buildMenu()
         buildWindow()
         setupEventTap()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Permission may have been granted while the app was already open.
+        if AXIsProcessTrusted(), polishHotKeyRef == nil || translationHotKeyRef == nil {
+            setupEventTap()
+        }
     }
 
     func configureDockIcons() {
@@ -1344,6 +1354,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
 
         unregisterGlobalHotkeys()
+        // Also observe key events so shortcuts recover if Carbon stops delivering
+        // its registered event after a system/session transition. Both paths use
+        // the same main-thread admission guard, so one press runs one operation.
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, !event.isARepeat else { return }
+            let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
+            if self.translationHotKeyRef != nil, self.hotkeyMatches(self.hotkey, keyCode: Int64(event.keyCode), flags: flags) {
+                self.handleRegisteredHotKey(translationHotKeyIdentifier)
+            } else if self.polishHotKeyRef != nil, self.hotkeyMatches(self.polishHotkey, keyCode: Int64(event.keyCode), flags: flags) {
+                self.handleRegisteredHotKey(polishHotKeyIdentifier)
+            }
+        }
 
         if hotKeyEventHandler == nil {
             var eventType = EventTypeSpec(
@@ -1408,6 +1430,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     }
 
     func unregisterGlobalHotkeys() {
+        if let globalKeyMonitor {
+            NSEvent.removeMonitor(globalKeyMonitor)
+            self.globalKeyMonitor = nil
+        }
         if let polishHotKeyRef {
             UnregisterEventHotKey(polishHotKeyRef)
             self.polishHotKeyRef = nil
@@ -1428,7 +1454,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         default:
             return
         }
-        translationQueue.async { self.handleTextAction(action) }
+        // Reject repeats here, before they can queue against a later selection.
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !textActionRunning, now - lastHotkeyTime > 0.25 else { return }
+        lastHotkeyTime = now
+        guard AXIsProcessTrusted() else { showAccessibilityAlert(); return }
+        textActionRunning = true
+        translationQueue.async {
+            self.handleTextAction(action)
+            DispatchQueue.main.async { self.textActionRunning = false }
+        }
     }
 
     func showHotkeyRegistrationAlert(_ details: String) {
@@ -1755,6 +1790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
 
     // Runs on the serial translation queue. All AppKit/AX access stays on main.
     func handleTextAction(_ action: TextAction) {
+        didShowTranslatorError = false
         setTranslationInProgress(true)
         DispatchQueue.main.async {
             self.translationProgressLabel?.stringValue = self.l(action.progressTitle)
@@ -1766,7 +1802,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         var sourceRange: NSRange?
         var savedItems = [[NSPasteboard.PasteboardType: Data]]()
         var ownedChangeCount: Int?
+        var initialClipboardChangeCount = 0
         DispatchQueue.main.sync {
+            initialClipboardChangeCount = NSPasteboard.general.changeCount
             sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
             sourceElement = focusedAXElement()
             sourceRange = sourceElement.flatMap { selectedRange(from: $0) }
@@ -1792,8 +1830,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
 
         func destinationIsUnchanged(_ current: AXUIElement?, editable: Bool = false) -> Bool {
-            guard let sourcePID, sourcePID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                  let sourceElement, let current, CFEqual(sourceElement, current) else { return false }
+            guard TextReplacementSafety.sameDestination(
+                sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                sourceHasElement: sourceElement != nil, currentHasElement: current != nil,
+                sameElement: sourceElement.flatMap { source in current.map { CFEqual(source, $0) } } ?? false,
+                inserting: editable) else { return false }
+            guard let current else { return true }
             if editable && !elementAllowsTextInsertion(current) { return false }
             if let sourceRange, let range = selectedRange(from: current), sourceRange != range { return false }
             return true
@@ -1820,7 +1862,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             var sent = false
             DispatchQueue.main.sync {
                 guard destinationIsUnchanged(focusedAXElement()) else { return }
-                if let ownedChangeCount, NSPasteboard.general.changeCount != ownedChangeCount { return }
+                guard NSPasteboard.general.changeCount == (ownedChangeCount ?? initialClipboardChangeCount) else { return }
                 writeClipboard(sentinel)
                 postKey(8, flags: .maskCommand)
                 sent = true
@@ -1846,8 +1888,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             return nil
         }
 
-        guard let selected = copySelection(),
-              let transformed = transformSelectedText(selected, action: action) else { return }
+        // Prefer AX for initial capture: Cmd+C is unavailable in some selections and
+        // some apps do not publish a clipboard change when copying the same text.
+        var accessibleSelection: String?
+        DispatchQueue.main.sync {
+            if let element = focusedAXElement(), destinationIsUnchanged(element),
+               let text = stringAttribute(kAXSelectedTextAttribute, from: element),
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                accessibleSelection = text
+            }
+        }
+        guard let selected = accessibleSelection ?? copySelection(),
+              !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            showTranslatorError(l("Select text in the source app, release the shortcut keys, and try again."))
+            return
+        }
+        guard let transformed = transformSelectedText(selected, action: action) else { return }
         if TextReplacementSafety.sameText(selected, transformed) { return }
 
         // Always refresh the selection: some web editors report stale AXSelectedText.
@@ -1867,15 +1923,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
                       NSPasteboard.general.changeCount == ownedChangeCount else { return }
                 // Prefer the editor's replacement API when it explicitly supports it.
                 // Do not set AXValue: that would replace the whole document.
+                beforeValue = stringAttribute(kAXValueAttribute, from: element)
                 var settable = DarwinBoolean(false)
                 if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
                    settable.boolValue,
                    AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString,
                                                 transformed as CFString) == .success {
-                    inserted = true
+                    // Some editors accept the AX request without changing their text.
+                    // Verify below, and never send a second insertion on uncertainty.
+                    pasteSent = true
                     return
                 }
-                beforeValue = stringAttribute(kAXValueAttribute, from: element)
                 writeClipboard(transformed)
                 postKey(9, flags: .maskCommand)
                 pasteSent = true
@@ -1908,6 +1966,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
         // For opaque editors keep the translation available for a late paste or manual
         // recovery, rather than restoring the old clipboard before it has been consumed.
+        DispatchQueue.main.sync {
+            if NSPasteboard.general.changeCount == ownedChangeCount { writeClipboard(transformed) }
+        }
         ownedChangeCount = nil
         showTranslationOverlay(transformed, sourceText: selected, action: action)
     }
@@ -2118,9 +2179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             }
 
             if result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if !errText.isEmpty {
-                    showTranslatorError(friendlyTranslationError(errText))
-                }
+                showTranslatorError(friendlyTranslationError(errText))
                 return nil
             }
             didShowTranslatorError = false

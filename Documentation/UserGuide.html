@@ -46,7 +46,7 @@
 
     <h2>Troubleshooting</h2>
     <ul>
-      <li><strong>A shortcut does nothing:</strong> check Accessibility permission and make sure another app or macOS has not taken the same shortcut. Change it in Settings if needed.</li>
+      <li><strong>A shortcut does nothing:</strong> check Accessibility permission and make sure another app or macOS has not taken the same shortcut. Change it in Settings if needed. After granting Accessibility permission, switch back to MyTranslator so it can register its shortcuts automatically.</li>
       <li><strong>A language is missing:</strong> download it in Apple's Translate app, then reopen Settings.</li>
       <li><strong>Translation times out:</strong> try again or increase the maximum wait time in Settings.</li>
       <li><strong>Improve is unavailable:</strong> check that Apple Foundation Models is available on this Mac.</li>
@@ -54,12 +54,17 @@
     </ul>
 
     <h2>Reliable translation and replacement</h2>
+    <p>Only one operation runs at a time. Repeated shortcuts while it is working are ignored, so they cannot translate a later selection unexpectedly. Clipboard changes made while translation is running are preserved, including when selection capture did not need Copy. Selection capture first reads Accessibility selected text and falls back to Copy. Read-only apps without a focused Accessibility element can still translate through Copy. If capture fails, a message asks you to select text and release the shortcut keys; failures no longer disappear silently after an earlier error.</p>
     <p>The translation timeout includes sending the selected text to the local translator, waiting for its result, and collecting output. A stalled translator is stopped so another operation can be attempted.</p>
     <p>Release the shortcut keys after triggering translation. MyTranslator waits for the keys to be released and for the editor to finish copying, then verifies the original app, focused editable element, selection and available selection positions again before insertion. It uses the editor's direct selection replacement API when supported; other editors receive Paste. The clipboard remains available while a slow editor processes Paste. Copying other content during translation cancels automatic insertion and keeps that newer clipboard content. A successful paste is checked against the expected document text, rather than merely finding the translation somewhere in the document.</p>
     <p>If the destination changes or insertion cannot be confirmed, the result window provides the translation for manual recovery. Check the editor before pasting manually to avoid inserting the result twice. When paste cannot be confirmed, the translation stays on the clipboard so a delayed paste can still use it. Otherwise, the previous clipboard contents, including formatting and other data types, are restored only if no newer copy has replaced them.</p>
     <p>Rebuilding prepares and verifies a separate bundle before replacing the app. If compilation or signing fails, the previous app remains available.</p>
     <h2>What's new in this build</h2>
     <ul>
+      <li>Added a second shortcut delivery path for successfully registered shortcuts with duplicate suppression, and automatic registration after Accessibility permission is granted while the app is open.</li>
+      <li>Fixed silent selection-capture failures and blocked read-only selections when an app supplies no Accessibility focus element.</li>
+      <li>Prevented repeated shortcuts from queuing operations against a later selection. Each failed operation can report its error again.</li>
+      <li>Direct Accessibility replacement now verifies the actual document change instead of trusting the editor's success response.</li>
       <li>More reliable editable-text replacement: waits for shortcut release and actual copy completion, refreshes selection verification, and uses direct selection replacement where supported.</li>
       <li>Fixed clipboard races during slow paste and successive translations. Verification no longer copies over a pending paste; clipboard restoration preserves all saved formats and respects newer copies.</li>
       <li>Paste confirmation now checks the expected document change, including selections after emoji, rather than accepting translated text that was already present elsewhere.</li>

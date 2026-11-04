@@ -3,6 +3,25 @@ import Foundation
 @main
 struct StabilityTests {
     static func main() throws {
+        // Missing AX focus is allowed only for capture in the same app.
+        precondition(TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+            sourceHasElement: false, currentHasElement: false, sameElement: false, inserting: false))
+        precondition(!TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+            sourceHasElement: false, currentHasElement: false, sameElement: false, inserting: true))
+        precondition(!TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 11,
+            sourceHasElement: false, currentHasElement: false, sameElement: false, inserting: false))
+        precondition(!TextReplacementSafety.sameDestination(sourcePID: nil, currentPID: nil,
+            sourceHasElement: false, currentHasElement: false, sameElement: false, inserting: false))
+        for inserting in [false, true] {
+            precondition(TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+                sourceHasElement: true, currentHasElement: true, sameElement: true, inserting: inserting))
+            precondition(!TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+                sourceHasElement: true, currentHasElement: true, sameElement: false, inserting: inserting))
+            precondition(!TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+                sourceHasElement: true, currentHasElement: false, sameElement: false, inserting: inserting))
+            precondition(!TextReplacementSafety.sameDestination(sourcePID: 10, currentPID: 10,
+                sourceHasElement: false, currentHasElement: true, sameElement: false, inserting: inserting))
+        }
         let environment = ProcessInfo.processInfo.environment
         let payload = Data(repeating: 65, count: 1_048_576)
         let echo = try TranslationProcess.run(executable: URL(fileURLWithPath: "/bin/cat"),

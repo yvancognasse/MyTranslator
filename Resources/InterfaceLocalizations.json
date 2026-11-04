@@ -2135,6 +2135,30 @@
       "Чтобы использовать язык, который не установлен, загрузите его в Apple Translate для автономного использования. Управлять загруженными языками можно в его настройках.",
       "หากต้องการใช้ภาษาที่ไม่ได้ติดตั้ง ให้ดาวน์โหลดใน Apple Translate เพื่อใช้งานแบบออฟไลน์ คุณสามารถจัดการภาษาที่ดาวน์โหลดได้ในการตั้งค่า",
       "Щоб використовувати мову, яка не встановлена, завантажте її в Apple Translate для використання в автономному режимі. Ви можете керувати завантаженими мовами в його налаштуваннях."
+    ],
+    "Select text in the source app, release the shortcut keys, and try again.": [
+      "Sélectionnez du texte dans l'application source, relâchez les touches du raccourci et réessayez.",
+      "Wählen Sie Text in der Quell-App aus, lassen Sie die Tastenkombination los und versuchen Sie es erneut.",
+      "Seleccione texto en la aplicación de origen, suelte las teclas del atajo e inténtelo de nuevo.",
+      "Seleziona il testo nell'app di origine, rilascia i tasti della scorciatoia e riprova.",
+      "Selecione texto na aplicação de origem, solte as teclas do atalho e tente novamente.",
+      "Selecteer tekst in de bronapp, laat de sneltoetsen los en probeer het opnieuw.",
+      "Markér tekst i kildeappen, slip genvejstasterne, og prøv igen.",
+      "Marker tekst i kildeappen, slipp hurtigtastene og prøv igjen.",
+      "Markera text i källappen, släpp kortkommandot och försök igen.",
+      "Kaynak uygulamada metin seçin, kısayol tuşlarını bırakın ve tekrar deneyin.",
+      "Chọn văn bản trong ứng dụng nguồn, thả các phím tắt và thử lại.",
+      "元のアプリでテキストを選択し、ショートカットキーを離してから再試行してください。",
+      "원본 앱에서 텍스트를 선택하고 단축키에서 손을 뗀 후 다시 시도하세요.",
+      "请在源应用中选择文本，松开快捷键，然后重试。",
+      "請在來源應用程式中選取文字，放開快捷鍵，然後重試。",
+      "حدد نصا في التطبيق المصدر، ثم حرر مفاتيح الاختصار وحاول مرة أخرى.",
+      "स्रोत ऐप में टेक्स्ट चुनें, शॉर्टकट कुंजियां छोड़ें और फिर से प्रयास करें।",
+      "Pilih teks di aplikasi sumber, lepaskan tombol pintasan, lalu coba lagi.",
+      "Zaznacz tekst w aplikacji źródłowej, zwolnij klawisze skrótu i spróbuj ponownie.",
+      "Выделите текст в исходном приложении, отпустите клавиши сочетания и повторите попытку.",
+      "เลือกข้อความในแอปต้นทาง ปล่อยปุ่มลัด แล้วลองอีกครั้ง",
+      "Виділіть текст у вихідній програмі, відпустіть клавіші скорочення та спробуйте ще раз."
     ]
   }
 }
