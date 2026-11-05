@@ -33,7 +33,7 @@ printf '\n'
 
 command -v swiftc >/dev/null 2>&1 || { echo "❌ swiftc introuvable : installez Xcode Command Line Tools (xcode-select --install)"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "❌ python3 introuvable"; exit 1; }
-if [ ! -s "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/MyTranslatorApp.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/UILocalization.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/LocalTranslator.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/TranslationProcess.swift" -nt "$USER_GUIDE_HTML" ] || [ "$LOCALIZATIONS_JSON" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/create_app.sh" -nt "$USER_GUIDE_HTML" ]; then
+if [ ! -s "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/MyTranslatorApp.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/UILocalization.swift" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/Sources/LocalTranslator.swift" -nt "$USER_GUIDE_HTML" ] || [ "$LOCALIZATIONS_JSON" -nt "$USER_GUIDE_HTML" ] || [ "$SCRIPT_DIR/create_app.sh" -nt "$USER_GUIDE_HTML" ]; then
     echo "❌ Mettez à jour Documentation/UserGuide.html après chaque modification du code avant de reconstruire l’app." >&2
     exit 1
 fi
@@ -207,7 +207,7 @@ if [ ! -f "$SWIFT_SRC" ]; then
 fi
 
 echo "→ Compilation Swift..."
-swiftc -module-cache-path "$BUILD_TMP_DIR/clang-cache" -framework Cocoa -framework Carbon -framework AVFoundation -framework FoundationModels -O "$SWIFT_SRC" "$SCRIPT_DIR/Sources/UILocalization.swift" "$SCRIPT_DIR/Sources/TranslationProcess.swift" -o "$APP_PATH/Contents/MacOS/MyTranslator"
+swiftc -module-cache-path "$BUILD_TMP_DIR/clang-cache" -framework Cocoa -framework Carbon -framework AVFoundation -framework FoundationModels -O "$SWIFT_SRC" "$SCRIPT_DIR/Sources/UILocalization.swift" -o "$APP_PATH/Contents/MacOS/MyTranslator"
 echo "   ✓ Binaire compilé"
 
 cat > "$APP_PATH/Contents/Info.plist" <<PLIST

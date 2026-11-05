@@ -16,11 +16,8 @@ git commit -m "Describe the change"
 git push origin main
 ```
 
-## Stability checks
+## Restored application baseline
 
-```sh
-swiftc -parse-as-library Sources/TranslationProcess.swift Tests/StabilityTests.swift -o /tmp/mytranslator-stability-tests
-/tmp/mytranslator-stability-tests
-```
+On November 5, 2026, the local application was rolled back to the preserved, signed October 19 build 102. Its bundled guide and localization catalog match the initial source import (`e3dbb6d`). The application source and catalog have been restored to that earliest available source snapshot; Git history starts on November 1 and cannot independently prove the October 19 source revision. Later shortcut, translation-process, replacement and clipboard changes have been removed. The safer staged build packaging remains in place.
 
-The tests use synthetic text and child processes; they do not access the clipboard or translate private content. Builds retain the previous app until compilation and signing succeed.
+Run `bash create_app.sh` to validate localization completeness, compile the restored source and sign the application. A rebuild produces a new build number. The rollback itself installs the preserved October 19 bundle without modifying its signature. Existing macOS preferences are retained. The newer local application is preserved under the ignored `.build` directory.

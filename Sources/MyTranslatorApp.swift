@@ -467,12 +467,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     private var hotKeyEventHandler: EventHandlerRef?
     private var polishHotKeyRef: EventHotKeyRef?
     private var translationHotKeyRef: EventHotKeyRef?
-    private var globalKeyMonitor: Any?
-    private var lastHotkeyTime: TimeInterval = -.infinity
 
     private let translationQueue = DispatchQueue(label: "com.user.mytranslator.translation")
     private var didShowTranslatorError = false
-    private var textActionRunning = false // Accessed only on the main thread.
 
     private var hotkey: Hotkey {
         parseHotkey(configValue("MYTRANSLATOR_HOTKEY"))
@@ -695,13 +692,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         buildMenu()
         buildWindow()
         setupEventTap()
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        // Permission may have been granted while the app was already open.
-        if AXIsProcessTrusted(), polishHotKeyRef == nil || translationHotKeyRef == nil {
-            setupEventTap()
-        }
     }
 
     func configureDockIcons() {
@@ -1354,18 +1344,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
 
         unregisterGlobalHotkeys()
-        // Also observe key events so shortcuts recover if Carbon stops delivering
-        // its registered event after a system/session transition. Both paths use
-        // the same main-thread admission guard, so one press runs one operation.
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, !event.isARepeat else { return }
-            let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
-            if self.translationHotKeyRef != nil, self.hotkeyMatches(self.hotkey, keyCode: Int64(event.keyCode), flags: flags) {
-                self.handleRegisteredHotKey(translationHotKeyIdentifier)
-            } else if self.polishHotKeyRef != nil, self.hotkeyMatches(self.polishHotkey, keyCode: Int64(event.keyCode), flags: flags) {
-                self.handleRegisteredHotKey(polishHotKeyIdentifier)
-            }
-        }
 
         if hotKeyEventHandler == nil {
             var eventType = EventTypeSpec(
@@ -1430,10 +1408,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     }
 
     func unregisterGlobalHotkeys() {
-        if let globalKeyMonitor {
-            NSEvent.removeMonitor(globalKeyMonitor)
-            self.globalKeyMonitor = nil
-        }
         if let polishHotKeyRef {
             UnregisterEventHotKey(polishHotKeyRef)
             self.polishHotKeyRef = nil
@@ -1454,16 +1428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         default:
             return
         }
-        // Reject repeats here, before they can queue against a later selection.
-        let now = ProcessInfo.processInfo.systemUptime
-        guard !textActionRunning, now - lastHotkeyTime > 0.25 else { return }
-        lastHotkeyTime = now
-        guard AXIsProcessTrusted() else { showAccessibilityAlert(); return }
-        textActionRunning = true
-        translationQueue.async {
-            self.handleTextAction(action)
-            DispatchQueue.main.async { self.textActionRunning = false }
-        }
+        translationQueue.async { self.handleTextAction(action) }
     }
 
     func showHotkeyRegistrationAlert(_ details: String) {
@@ -1788,200 +1753,141 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         }
     }
 
-    // Runs on the serial translation queue. All AppKit/AX access stays on main.
     func handleTextAction(_ action: TextAction) {
-        didShowTranslatorError = false
+        func normalizedClipboardText(_ text: String) -> String {
+            text
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        }
+
         setTranslationInProgress(true)
         DispatchQueue.main.async {
             self.translationProgressLabel?.stringValue = self.l(action.progressTitle)
         }
-        defer { setTranslationInProgress(false) }
-
-        var sourcePID: pid_t?
-        var sourceElement: AXUIElement?
-        var sourceRange: NSRange?
-        var savedItems = [[NSPasteboard.PasteboardType: Data]]()
-        var ownedChangeCount: Int?
-        var initialClipboardChangeCount = 0
-        DispatchQueue.main.sync {
-            initialClipboardChangeCount = NSPasteboard.general.changeCount
-            sourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            sourceElement = focusedAXElement()
-            sourceRange = sourceElement.flatMap { selectedRange(from: $0) }
-            savedItems = (NSPasteboard.general.pasteboardItems ?? []).map { item in
-                var data = [NSPasteboard.PasteboardType: Data]()
-                for type in item.types { data[type] = item.data(forType: type) }
-                return data
-            }
-        }
-        // Never restore on a timer: that can overwrite the next operation or a user copy.
         defer {
-            DispatchQueue.main.sync {
-                let board = NSPasteboard.general
-                guard let ownedChangeCount, board.changeCount == ownedChangeCount else { return }
-                board.clearContents()
-                let items = savedItems.map { saved -> NSPasteboardItem in
-                    let item = NSPasteboardItem()
-                    for (type, data) in saved { item.setData(data, forType: type) }
-                    return item
-                }
-                if !items.isEmpty { board.writeObjects(items) }
-            }
+            setTranslationInProgress(false)
         }
 
-        func destinationIsUnchanged(_ current: AXUIElement?, editable: Bool = false) -> Bool {
-            guard TextReplacementSafety.sameDestination(
-                sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                sourceHasElement: sourceElement != nil, currentHasElement: current != nil,
-                sameElement: sourceElement.flatMap { source in current.map { CFEqual(source, $0) } } ?? false,
-                inserting: editable) else { return false }
-            guard let current else { return true }
-            if editable && !elementAllowsTextInsertion(current) { return false }
-            if let sourceRange, let range = selectedRange(from: current), sourceRange != range { return false }
-            return true
-        }
-        func writeClipboard(_ text: String) {
-            let board = NSPasteboard.general
-            board.clearContents()
-            board.setString(text, forType: .string)
-            ownedChangeCount = board.changeCount
-        }
-        // Held shortcut modifiers can turn Cmd+C/V into another command in the target app.
-        func waitForShortcutRelease() -> Bool {
-            let deadline = ProcessInfo.processInfo.systemUptime + 3
-            let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
-            while !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty {
-                guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-            return true
-        }
-        func copySelection() -> String? {
-            guard waitForShortcutRelease() else { return nil }
-            let sentinel = "__MYTRANSLATOR_COPY_\(UUID().uuidString)__"
-            var sent = false
-            DispatchQueue.main.sync {
-                guard destinationIsUnchanged(focusedAXElement()) else { return }
-                guard NSPasteboard.general.changeCount == (ownedChangeCount ?? initialClipboardChangeCount) else { return }
-                writeClipboard(sentinel)
-                postKey(8, flags: .maskCommand)
-                sent = true
-            }
-            guard sent else { return nil }
-            let deadline = ProcessInfo.processInfo.systemUptime + 2
-            while ProcessInfo.processInfo.systemUptime < deadline {
-                Thread.sleep(forTimeInterval: 0.025)
-                var result: String?
-                var unchanged = false
-                DispatchQueue.main.sync {
-                    unchanged = destinationIsUnchanged(focusedAXElement())
-                    let board = NSPasteboard.general
-                    if unchanged, board.changeCount != ownedChangeCount,
-                       let text = board.string(forType: .string), text != sentinel, !text.isEmpty {
-                        result = text
-                        ownedChangeCount = board.changeCount
-                    }
-                }
-                if !unchanged { return nil }
-                if let result { return result }
-            }
-            return nil
-        }
-
-        // Prefer AX for initial capture: Cmd+C is unavailable in some selections and
-        // some apps do not publish a clipboard change when copying the same text.
-        var accessibleSelection: String?
+        var saved = ""
         DispatchQueue.main.sync {
-            if let element = focusedAXElement(), destinationIsUnchanged(element),
-               let text = stringAttribute(kAXSelectedTextAttribute, from: element),
-               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                accessibleSelection = text
-            }
+            saved = NSPasteboard.general.string(forType: .string) ?? ""
         }
-        guard let selected = accessibleSelection ?? copySelection(),
-              !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            showTranslatorError(l("Select text in the source app, release the shortcut keys, and try again."))
+
+        DispatchQueue.main.sync {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("__MYTRANSLATOR_SENTINEL__", forType: .string)
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+
+        postKey(8, flags: .maskCommand)
+        Thread.sleep(forTimeInterval: 0.35)
+
+        var selected = ""
+        DispatchQueue.main.sync {
+            selected = NSPasteboard.general.string(forType: .string) ?? ""
+        }
+
+        guard !selected.isEmpty, selected != "__MYTRANSLATOR_SENTINEL__" else {
+            restore(saved)
             return
         }
-        guard let transformed = transformSelectedText(selected, action: action) else { return }
-        if TextReplacementSafety.sameText(selected, transformed) { return }
 
-        // Always refresh the selection: some web editors report stale AXSelectedText.
-        let copiedSelection = copySelection()
-        var inserted = false
-        var pasteSent = false
-        var beforeValue: String?
-        if waitForShortcutRelease() {
-            DispatchQueue.main.sync {
-                guard let element = focusedAXElement(), destinationIsUnchanged(element, editable: true),
-                      TextReplacementSafety.canReplace(
-                        sourcePID: sourcePID, currentPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                        sameElement: true, original: selected,
-                        selected: nil,
-                        originalRange: sourceRange, currentRange: selectedRange(from: element),
-                        copiedSelection: copiedSelection), copiedSelection != nil,
-                      NSPasteboard.general.changeCount == ownedChangeCount else { return }
-                // Prefer the editor's replacement API when it explicitly supports it.
-                // Do not set AXValue: that would replace the whole document.
-                beforeValue = stringAttribute(kAXValueAttribute, from: element)
-                var settable = DarwinBoolean(false)
-                if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
-                   settable.boolValue,
-                   AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString,
-                                                transformed as CFString) == .success {
-                    // Some editors accept the AX request without changing their text.
-                    // Verify below, and never send a second insertion on uncertainty.
-                    pasteSent = true
-                    return
-                }
-                writeClipboard(transformed)
-                postKey(9, flags: .maskCommand)
-                pasteSent = true
-            }
+        guard let transformed = transformSelectedText(selected, action: action) else {
+            restore(saved)
+            return
         }
-        if inserted { return }
-        guard pasteSent else {
+
+        DispatchQueue.main.sync {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(transformed, forType: .string)
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+        postKey(9, flags: .maskCommand)
+        Thread.sleep(forTimeInterval: 0.55)
+
+        let focusedElementContainsTranslatedText = focusedElementContainsText(transformed)
+        if focusedElementContainsTranslatedText {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
+                self.restore(saved)
+            }
+            return
+        }
+
+        let accessibilitySelectionStillOriginal = focusedSelectedTextMatches(selected)
+
+        let verificationSentinel = "__MYTRANSLATOR_VERIFY_\(UUID().uuidString)__"
+        DispatchQueue.main.sync {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(verificationSentinel, forType: .string)
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+        postKey(8, flags: .maskCommand)
+        Thread.sleep(forTimeInterval: 0.30)
+
+        var afterPasteSelection = ""
+        DispatchQueue.main.sync {
+            afterPasteSelection = NSPasteboard.general.string(forType: .string) ?? ""
+        }
+
+        let originalStillSelected =
+            normalizedClipboardText(afterPasteSelection) == normalizedClipboardText(selected)
+            && normalizedClipboardText(transformed) != normalizedClipboardText(selected)
+        let verificationCopyDidNotRun = afterPasteSelection == verificationSentinel
+        let pasteFailedWithOriginalStillSelected =
+            originalStillSelected || (verificationCopyDidNotRun && accessibilitySelectionStillOriginal)
+
+        if pasteFailedWithOriginalStillSelected {
+            restore(saved)
             showTranslationOverlay(transformed, sourceText: selected, action: action)
             return
         }
 
-        // Keep the paste payload available while slow editors consume it. Never issue
-        // a verification Cmd+C here: it can replace the payload before Cmd+V reads it.
-        let deadline = ProcessInfo.processInfo.systemUptime + 2
-        while ProcessInfo.processInfo.systemUptime < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-            var changedDestination = false
-            DispatchQueue.main.sync {
-                guard let sourcePID, sourcePID == NSWorkspace.shared.frontmostApplication?.processIdentifier,
-                      let sourceElement, let current = focusedAXElement(), CFEqual(sourceElement, current) else {
-                    changedDestination = true
-                    return
-                }
-                inserted = TextReplacementSafety.confirmsReplacement(
-                    before: beforeValue, after: stringAttribute(kAXValueAttribute, from: current),
-                    range: sourceRange, replacement: transformed)
-            }
-            if inserted { return }
-            if changedDestination { break }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
+            self.restore(saved)
         }
-        // For opaque editors keep the translation available for a late paste or manual
-        // recovery, rather than restoring the old clipboard before it has been consumed.
-        DispatchQueue.main.sync {
-            if NSPasteboard.general.changeCount == ownedChangeCount { writeClipboard(transformed) }
-        }
-        ownedChangeCount = nil
-        showTranslationOverlay(transformed, sourceText: selected, action: action)
     }
 
-    func selectedRange(from element: AXUIElement) -> NSRange? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        let rangeValue = value as! AXValue
-        guard AXValueGetType(rangeValue) == .cfRange else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(rangeValue, .cfRange, &range), range.location >= 0, range.length >= 0 else { return nil }
-        return NSRange(location: range.location, length: range.length)
+    func focusedElementAllowsTextInsertion() -> Bool {
+        guard let focusedElement = focusedAXElement() else {
+            return false
+        }
+        return elementAllowsTextInsertion(focusedElement)
+    }
+
+    func focusedElementContainsText(_ text: String) -> Bool {
+        guard !text.isEmpty, let focusedElement = focusedAXElement() else {
+            return false
+        }
+
+        let normalizedNeedle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedNeedle.isEmpty else {
+            return false
+        }
+
+        return elementOrAncestor(focusedElement) { element in
+            guard let value = stringAttribute(kAXValueAttribute, from: element) else {
+                return false
+            }
+            return value.contains(normalizedNeedle)
+        }
+    }
+
+    func focusedSelectedTextMatches(_ text: String) -> Bool {
+        guard !text.isEmpty, let focusedElement = focusedAXElement() else {
+            return false
+        }
+
+        let expected = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expected.isEmpty else {
+            return false
+        }
+
+        return elementOrAncestor(focusedElement) { element in
+            guard let selectedText = stringAttribute(kAXSelectedTextAttribute, from: element) else {
+                return false
+            }
+            return selectedText.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+        }
     }
 
     func focusedAXElement() -> AXUIElement? {
@@ -2016,15 +1922,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
                 return true
             }
 
-            var selectedTextSettable = DarwinBoolean(false)
-            if AXUIElementIsAttributeSettable(
-                element, kAXSelectedTextAttribute as CFString, &selectedTextSettable
-            ) == .success, selectedTextSettable.boolValue {
-                return true
-            }
-
             if let role = stringAttribute(kAXRoleAttribute, from: element),
-               role == "AXTextField" || role == "AXTextArea" || role == "AXComboBox" {
+               role == "AXTextField" || role == "AXComboBox" {
                 return true
             }
 
@@ -2130,6 +2029,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         up?.post(tap: .cgAnnotatedSessionEventTap)
     }
 
+    func restore(_ text: String) {
+        DispatchQueue.main.async {
+            NSPasteboard.general.clearContents()
+            if !text.isEmpty {
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
+    }
+
     func showTranslatorError(_ details: String) {
         guard !didShowTranslatorError else { return }
         didShowTranslatorError = true
@@ -2158,35 +2066,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
             return nil
         }
 
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = [runner]
         var environment = ProcessInfo.processInfo.environment
         environment["MYTRANSLATOR_SOURCE_LANGUAGE"] = configLanguageCode("MYTRANSLATOR_SOURCE_LANGUAGE")
         environment["MYTRANSLATOR_TARGET_LANGUAGE"] = configLanguageCode("MYTRANSLATOR_TARGET_LANGUAGE")
-        let timeoutSeconds = configTimeoutSeconds()
-        environment["MYTRANSLATOR_TIMEOUT_SECONDS"] = String(timeoutSeconds)
+        environment["MYTRANSLATOR_TIMEOUT_SECONDS"] = String(configTimeoutSeconds())
+        p.environment = environment
+
+        let inPipe = Pipe()
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        p.standardInput = inPipe
+        p.standardOutput = outPipe
+        p.standardError = errPipe
 
         do {
-            let captured = try TranslationProcess.run(
-                executable: URL(fileURLWithPath: "/bin/bash"), arguments: [runner],
-                environment: environment, input: Data(text.utf8), timeout: TimeInterval(timeoutSeconds))
-            let result = String(data: captured.output, encoding: .utf8) ?? ""
-            let errText = String(data: captured.errors, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let ioQueue = DispatchQueue(label: "com.user.mytranslator.process-output")
+            let outputClosed = DispatchGroup()
+            outputClosed.enter()
+            outputClosed.enter()
+            var outData = Data()
+            var errData = Data()
 
-            guard captured.status == 0 else {
-                let rawDetails = errText.isEmpty ? "exit code \(captured.status)" : errText
+            outPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                guard !data.isEmpty else {
+                    handle.readabilityHandler = nil
+                    outputClosed.leave()
+                    return
+                }
+                ioQueue.sync {
+                    outData.append(data)
+                }
+            }
+
+            errPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                guard !data.isEmpty else {
+                    handle.readabilityHandler = nil
+                    outputClosed.leave()
+                    return
+                }
+                ioQueue.sync {
+                    errData.append(data)
+                }
+            }
+
+            try p.run()
+            if let data = text.data(using: .utf8) {
+                inPipe.fileHandleForWriting.write(data)
+            }
+            inPipe.fileHandleForWriting.closeFile()
+
+            let finished = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .utility).async {
+                p.waitUntilExit()
+                finished.signal()
+            }
+
+            let timeoutSeconds = configTimeoutSeconds()
+            if finished.wait(timeout: .now() + TimeInterval(timeoutSeconds)) == .timedOut {
+                p.terminate()
+                if finished.wait(timeout: .now() + 2) == .timedOut, p.isRunning {
+                    _ = kill(p.processIdentifier, SIGKILL)
+                    _ = finished.wait(timeout: .now() + 2)
+                }
+                _ = outputClosed.wait(timeout: .now() + 2)
+                outPipe.fileHandleForReading.readabilityHandler = nil
+                errPipe.fileHandleForReading.readabilityHandler = nil
+                showTranslatorError("\(l("Apple Translation timed out after")) \(timeoutSeconds) \(l("seconds"))")
+                return nil
+            }
+
+            _ = outputClosed.wait(timeout: .now() + 2)
+
+            let captured = ioQueue.sync { (outData, errData) }
+            let result = String(data: captured.0, encoding: .utf8) ?? ""
+            let errText = String(data: captured.1, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard p.terminationStatus == 0 else {
+                let rawDetails = errText.isEmpty ? "exit code \(p.terminationStatus)" : errText
                 let details = friendlyTranslationError(rawDetails)
                 showTranslatorError(details)
                 return nil
             }
 
             if result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                showTranslatorError(friendlyTranslationError(errText))
+                if !errText.isEmpty {
+                    showTranslatorError(friendlyTranslationError(errText))
+                }
                 return nil
             }
             didShowTranslatorError = false
             return result
-        } catch TranslationProcess.Failure.timedOut {
-            showTranslatorError("\(l("Apple Translation timed out after")) \(timeoutSeconds) \(l("seconds"))")
-            return nil
         } catch {
             showTranslatorError(l("Unable to launch the local translator."))
             return nil
