@@ -124,7 +124,7 @@ final class HotkeyCaptureField: NSTextField {
         layer?.cornerRadius = 9
         layer?.backgroundColor = WidgetStyle.elevated.cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.10).cgColor
+        layer?.borderColor = WidgetStyle.border.cgColor
     }
 
     override var acceptsFirstResponder: Bool {
@@ -138,7 +138,7 @@ final class HotkeyCaptureField: NSTextField {
         layer?.borderWidth = isActive ? 2 : 1
         layer?.borderColor = isActive
             ? WidgetStyle.accent.cgColor
-            : NSColor(calibratedWhite: 1, alpha: 0.10).cgColor
+            : WidgetStyle.border.cgColor
 
         let value = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
@@ -267,7 +267,7 @@ final class HotkeyCaptureField: NSTextField {
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
         let textColor = WidgetStyle.text
         let capFill = WidgetStyle.surface
-        let capBorder = NSColor(calibratedWhite: 1, alpha: 0.14)
+        let capBorder = WidgetStyle.border
 
         var x = bounds.maxX - 8
         let y = bounds.midY - 9
@@ -335,8 +335,8 @@ final class OverlayResizeHandle: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let targetWindow else { return }
         let currentMouse = NSEvent.mouseLocation
-        let minWidth: CGFloat = 360
-        let minHeight: CGFloat = 180
+        let minWidth: CGFloat = 520
+        let minHeight: CGFloat = 280
         let newWidth = max(minWidth, initialFrame.width + currentMouse.x - initialMouse.x)
         let newHeight = max(minHeight, initialFrame.height - (currentMouse.y - initialMouse.y))
         let newFrame = NSRect(
@@ -349,16 +349,33 @@ final class OverlayResizeHandle: NSView {
     }
 }
 
+// Keep the accent visible in a nonactivating result panel while retaining AppKit
+// mouse tracking, target/action dispatch, accessibility, and keyboard focus.
+private final class AccentButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
+        let fill = isHighlighted ? WidgetStyle.accent.blended(withFraction: 0.18, of: .black)! : WidgetStyle.accent
+        (isEnabled ? fill : WidgetStyle.secondary).setFill()
+        path.fill()
+        super.draw(dirtyRect)
+        if window?.firstResponder === self {
+            NSFocusRingPlacement.only.set()
+            path.fill()
+        }
+    }
+}
+
 private enum WidgetStyle {
-    static let background = NSColor(calibratedRed: 0.105, green: 0.108, blue: 0.115, alpha: 1)
-    static let surface = NSColor(calibratedRed: 0.165, green: 0.170, blue: 0.180, alpha: 1)
-    static let elevated = NSColor(calibratedRed: 0.215, green: 0.220, blue: 0.235, alpha: 1)
-    static let text = NSColor(calibratedWhite: 0.97, alpha: 1)
-    static let secondary = NSColor(calibratedWhite: 0.68, alpha: 1)
-    static let subtle = NSColor(calibratedWhite: 0.40, alpha: 1)
-    static let accent = NSColor(calibratedRed: 0.55, green: 0.72, blue: 1.0, alpha: 1)
-    static let warning = NSColor(calibratedRed: 1.0, green: 0.74, blue: 0.42, alpha: 1)
-    static let success = NSColor(calibratedRed: 0.55, green: 0.87, blue: 0.67, alpha: 1)
+    static let background = NSColor(calibratedWhite: 0.975, alpha: 1)
+    static let surface = NSColor.white
+    static let elevated = NSColor(calibratedWhite: 0.94, alpha: 1)
+    static let text = NSColor(calibratedWhite: 0.10, alpha: 1)
+    static let secondary = NSColor(calibratedWhite: 0.34, alpha: 1)
+    static let subtle = NSColor(calibratedWhite: 0.70, alpha: 1)
+    static let border = NSColor(calibratedWhite: 0.80, alpha: 1)
+    static let accent = NSColor(calibratedRed: 0.145, green: 0.388, blue: 0.922, alpha: 1)
+    static let warning = NSColor(calibratedRed: 0.60, green: 0.31, blue: 0.02, alpha: 1)
+    static let success = NSColor(calibratedRed: 0.10, green: 0.43, blue: 0.23, alpha: 1)
 
     static func font(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         .systemFont(ofSize: size, weight: weight)
@@ -368,39 +385,27 @@ private enum WidgetStyle {
         let box = NSBox(frame: frame)
         box.boxType = .custom
         box.fillColor = fill
-        box.borderColor = NSColor(calibratedWhite: 1, alpha: 0.08)
+        box.borderColor = border
         box.borderWidth = 1
         box.cornerRadius = radius
         return box
     }
 
     static func stylePrimaryButton(_ button: NSButton) {
+        button.bezelStyle = .rounded
         button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 8
-        button.layer?.backgroundColor = NSColor.systemBlue.cgColor
-        button.attributedTitle = NSAttributedString(
-            string: button.title,
-            attributes: [
-                .font: fittingButtonFont(for: button, preferredSize: 13),
-                .foregroundColor: NSColor.white
-            ]
-        )
+        button.contentTintColor = .white
+        button.font = fittingButtonFont(for: button, preferredSize: 13)
+        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+            .font: button.font!, .foregroundColor: NSColor.white
+        ])
     }
 
     static func styleSecondaryButton(_ button: NSButton, fontSize: CGFloat = 13) {
-        button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 8
-        button.layer?.backgroundColor = elevated.cgColor
+        button.bezelStyle = .rounded
+        button.isBordered = true
         button.contentTintColor = text
-        button.attributedTitle = NSAttributedString(
-            string: button.title,
-            attributes: [
-                .font: fittingButtonFont(for: button, preferredSize: fontSize),
-                .foregroundColor: text
-            ]
-        )
+        button.font = fittingButtonFont(for: button, preferredSize: fontSize)
     }
 
     private static func fittingButtonFont(for button: NSButton, preferredSize: CGFloat) -> NSFont {
@@ -457,6 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     private var sourceLanguagePopup: NSPopUpButton?
     private var targetLanguagePopup: NSPopUpButton?
     private var timeoutField: NSTextField?
+    private weak var idleStatusIcon: NSImageView?
     private weak var translationProgressIndicator: NSProgressIndicator?
     private weak var translationProgressLabel: NSTextField?
     private var normalDockIcon: NSImage?
@@ -819,132 +825,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     }
 
     func buildWindow(preserving frame: NSRect? = nil) {
-        let primaryLanguage = Self.displayLanguageLabel(configLanguageCode("MYTRANSLATOR_SOURCE_LANGUAGE"))
-        let translationLanguage = Self.displayLanguageLabel(configLanguageCode("MYTRANSLATOR_TARGET_LANGUAGE"))
-        let translationShortcutLabel = formatShortcut(configValue("MYTRANSLATOR_HOTKEY"))
-        let polishShortcutLabel = formatShortcut(configValue("MYTRANSLATOR_POLISH_HOTKEY"))
+        let width: CGFloat = 520
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 304),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
+            backing: .buffered, defer: false
         )
         window.title = "MyTranslator"
-        window.minSize = NSSize(width: 340, height: 304)
+        window.minSize = NSSize(width: width, height: 620)
         window.isReleasedWhenClosed = false
-        if let frame {
-            window.setContentSize(NSSize(width: 340, height: 304))
-            window.setFrameOrigin(frame.origin)
-        } else {
-            window.center()
-        }
+        if let frame { window.setFrameOrigin(frame.origin) } else { window.center() }
         window.delegate = self
         window.backgroundColor = WidgetStyle.background
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: .aqua)
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-
         let cv = window.contentView!
-        cv.wantsLayer = true
-        cv.layer?.backgroundColor = WidgetStyle.background.cgColor
-        func label(_ value: String, frame: NSRect, size: CGFloat,
+
+        @discardableResult
+        func label(_ value: String, _ rect: NSRect, size: CGFloat = 13,
                    weight: NSFont.Weight = .regular, color: NSColor = WidgetStyle.text) -> NSTextField {
-            let field = NSTextField(labelWithString: value)
-            field.frame = frame
+            let field = NSTextField(wrappingLabelWithString: value)
+            field.frame = rect
             field.font = WidgetStyle.font(size, weight: weight)
             field.textColor = color
-            field.lineBreakMode = .byTruncatingTail
             cv.addSubview(field)
             return field
         }
-
-        _ = label("MyTranslator", frame: NSRect(x: 22, y: 245, width: 205, height: 25),
-                  size: 19, weight: .bold)
-        _ = label("\(primaryLanguage)  ↔  \(translationLanguage)",
-                  frame: NSRect(x: 22, y: 221, width: 250, height: 19),
-                  size: 12, weight: .medium, color: WidgetStyle.secondary)
-
-        let appIcon = NSImageView(frame: NSRect(x: 280, y: 226, width: 40, height: 40))
-        appIcon.image = normalDockIcon
-        appIcon.imageScaling = .scaleProportionallyUpOrDown
-        appIcon.setAccessibilityLabel("MyTranslator")
-        cv.addSubview(appIcon)
-
-        let settings = NSButton(title: l("Settings"), target: self, action: #selector(showSetup))
-        settings.frame = NSRect(x: 66, y: 21, width: 80, height: 24)
-        settings.bezelStyle = .rounded
-        settings.font = WidgetStyle.font(13)
-        WidgetStyle.styleSecondaryButton(settings)
-        settings.toolTip = l("Settings")
-        cv.addSubview(settings)
-
-        let hideButton = NSButton(title: l("Hide"), target: self, action: #selector(minimizeMainWindow))
-        hideButton.frame = NSRect(x: 242, y: 21, width: 80, height: 24)
-        hideButton.bezelStyle = .rounded
-        hideButton.keyEquivalent = "\r"
-        hideButton.font = WidgetStyle.font(13)
-        WidgetStyle.stylePrimaryButton(hideButton)
-        hideButton.toolTip = l("Minimize the window without quitting the app")
-        cv.addSubview(hideButton)
-
-        let quitButton = NSButton(title: l("Quit"), target: self, action: #selector(quitApp))
-        quitButton.frame = NSRect(x: 154, y: 21, width: 80, height: 24)
-        quitButton.bezelStyle = .rounded
-        quitButton.font = WidgetStyle.font(13)
-        WidgetStyle.styleSecondaryButton(quitButton)
-        quitButton.toolTip = l("Quit MyTranslator")
-        cv.addSubview(quitButton)
-
-        let timeline = NSView(frame: NSRect(x: 29, y: 110, width: 1, height: 72))
-        timeline.wantsLayer = true
-        timeline.layer?.backgroundColor = WidgetStyle.subtle.cgColor
-        cv.addSubview(timeline)
-        for y in [176.0, 104.0] {
-            let node = NSView(frame: NSRect(x: 24, y: y, width: 11, height: 11))
-            node.wantsLayer = true
-            node.layer?.cornerRadius = 5.5
-            node.layer?.backgroundColor = WidgetStyle.text.cgColor
-            node.layer?.borderWidth = 3
-            node.layer?.borderColor = WidgetStyle.elevated.cgColor
-            cv.addSubview(node)
+        @discardableResult
+        func symbol(_ name: String, _ rect: NSRect, color: NSColor = WidgetStyle.secondary) -> NSImageView {
+            let icon = NSImageView(frame: rect)
+            icon.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            icon.contentTintColor = color
+            icon.setAccessibilityElement(false)
+            cv.addSubview(icon)
+            return icon
+        }
+        func divider(_ y: CGFloat) {
+            let line = NSBox(frame: NSRect(x: 0, y: y, width: width, height: 1))
+            line.boxType = .separator
+            cv.addSubview(line)
         }
 
-        _ = label(l("Translate"), frame: NSRect(x: 48, y: 172, width: 170, height: 21),
-                  size: 15, weight: .semibold)
-        _ = label(l("Replace or show the result"),
-                  frame: NSRect(x: 48, y: 150, width: 257, height: 17),
-                  size: 11, color: WidgetStyle.secondary)
-        let translateKey = label(translationShortcutLabel, frame: NSRect(x: 232, y: 173, width: 86, height: 18),
-                                 size: 11, weight: .semibold, color: WidgetStyle.accent)
-        translateKey.alignment = .right
-        _ = label(l("Improve"), frame: NSRect(x: 48, y: 100, width: 170, height: 21),
-                  size: 15, weight: .semibold)
-        _ = label(l("In the original language"), frame: NSRect(x: 48, y: 78, width: 250, height: 17),
-                  size: 11, color: WidgetStyle.secondary)
-        let polishKey = label(polishShortcutLabel, frame: NSRect(x: 232, y: 101, width: 86, height: 18),
-                              size: 11, weight: .semibold, color: WidgetStyle.accent)
-        polishKey.alignment = .right
+        idleStatusIcon = symbol("checkmark.circle", NSRect(x: 28, y: 551, width: 23, height: 23), color: WidgetStyle.success)
+        translationProgressLabel = label(l("Ready"), NSRect(x: 61, y: 551, width: 420, height: 24), size: 14)
+        label(l("Select text in your app."), NSRect(x: 28, y: 448, width: 464, height: 80),
+              size: 27, weight: .bold)
+        label(l("Then use a shortcut below."), NSRect(x: 28, y: 401, width: 464, height: 42),
+              size: 15, color: WidgetStyle.secondary)
 
-        let divider = NSView(frame: NSRect(x: 22, y: 59, width: 296, height: 1))
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = WidgetStyle.elevated.cgColor
-        cv.addSubview(divider)
-        let spinner = NSProgressIndicator(frame: NSRect(x: 22, y: 24, width: 17, height: 17))
+        cv.addSubview(WidgetStyle.box(NSRect(x: 24, y: 306, width: 472, height: 86), radius: 12))
+        label(l("Primary"), NSRect(x: 44, y: 351, width: 185, height: 22), size: 12, color: WidgetStyle.secondary)
+        label(Self.displayLanguageLabel(configLanguageCode("MYTRANSLATOR_SOURCE_LANGUAGE")),
+              NSRect(x: 44, y: 319, width: 185, height: 28), size: 17, weight: .semibold)
+        symbol("arrow.left.arrow.right", NSRect(x: 246, y: 335, width: 24, height: 20))
+        label(l("Other language"), NSRect(x: 290, y: 351, width: 186, height: 22), size: 12, color: WidgetStyle.secondary)
+        label(Self.displayLanguageLabel(configLanguageCode("MYTRANSLATOR_TARGET_LANGUAGE")),
+              NSRect(x: 290, y: 319, width: 186, height: 28), size: 17, weight: .semibold)
+
+        func shortcutRow(y: CGFloat, title: String, detail: String, icon: String, configKey: String) {
+            cv.addSubview(WidgetStyle.box(NSRect(x: 24, y: y, width: 472, height: 82), radius: 12))
+            symbol(icon, NSRect(x: 42, y: y + 28, width: 27, height: 27))
+            label(title, NSRect(x: 85, y: y + 49, width: 254, height: 23), size: 17, weight: .semibold)
+            let description = label(detail, NSRect(x: 85, y: y + 8, width: 254, height: 39), size: 12, color: WidgetStyle.secondary)
+            let tokens = configValue(configKey).split(separator: "+").map(String.init)
+            let names = ["ctrl": "⌃", "shift": "⇧", "alt": "⌥", "cmd": "⌘"]
+            var right: CGFloat = 480
+            for token in tokens.reversed() {
+                let text = names[token] ?? formatShortcut(token)
+                let capWidth = max(25, (text as NSString).size(withAttributes: [.font: WidgetStyle.font(12)]).width + 12)
+                right -= capWidth
+                cv.addSubview(WidgetStyle.box(NSRect(x: right, y: y + 28, width: capWidth, height: 27),
+                                              fill: WidgetStyle.elevated, radius: 5))
+                let cap = label(text, NSRect(x: right, y: y + 31, width: capWidth, height: 21), size: 12, weight: .medium)
+                cap.alignment = .center
+                cap.setAccessibilityElement(false)
+                right -= 4
+            }
+            description.frame.size.width = min(254, max(160, right - 85 - 12))
+            // Expose the complete configured shortcut rather than isolated modifier glyphs.
+            let shortcut = formatShortcut(configValue(configKey))
+            cv.subviews.last?.setAccessibilityLabel(shortcut)
+            cv.subviews.last?.setAccessibilityElement(true)
+        }
+        shortcutRow(y: 205, title: l("Translate"), detail: l("Replace or show the result"),
+                    icon: "character.bubble", configKey: "MYTRANSLATOR_HOTKEY")
+        shortcutRow(y: 111, title: l("Improve"), detail: l("In the original language"),
+                    icon: "pencil", configKey: "MYTRANSLATOR_POLISH_HOTKEY")
+        symbol("checkmark.shield", NSRect(x: 30, y: 76, width: 21, height: 23))
+        label(l("Processed locally on your Mac"), NSRect(x: 61, y: 75, width: 430, height: 25),
+              size: 13, color: WidgetStyle.secondary)
+        divider(63)
+
+        func button(_ title: String, x: CGFloat, width: CGFloat, action: Selector, primary: Bool = false) {
+            let control = primary
+                ? AccentButton(title: title, target: self, action: action)
+                : NSButton(title: title, target: self, action: action)
+            control.frame = NSRect(x: x, y: 15, width: width, height: 34)
+            if primary { WidgetStyle.stylePrimaryButton(control) } else { WidgetStyle.styleSecondaryButton(control) }
+            cv.addSubview(control)
+        }
+        button(l("Settings"), x: 24, width: 140, action: #selector(showSetup))
+        button(l("Quit"), x: 256, width: 110, action: #selector(quitApp))
+        button(l("Hide"), x: 378, width: 118, action: #selector(minimizeMainWindow), primary: true)
+        let spinner = NSProgressIndicator(frame: NSRect(x: 30, y: 554, width: 18, height: 18))
         spinner.style = .spinning
-        spinner.controlSize = .small
         spinner.isIndeterminate = true
-        spinner.usesThreadedAnimation = true
         spinner.isDisplayedWhenStopped = false
         spinner.isHidden = true
         cv.addSubview(spinner)
         translationProgressIndicator = spinner
-
-        let progressLabel = label(l("Working…"), frame: NSRect(x: 47, y: 25, width: 145, height: 17),
-                                  size: 10, weight: .medium, color: WidgetStyle.secondary)
-        progressLabel.isHidden = true
-        translationProgressLabel = progressLabel
-
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -955,7 +945,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         let update = {
             let indicator = self.translationProgressIndicator
             indicator?.isHidden = !inProgress
-            self.translationProgressLabel?.isHidden = !inProgress
+            self.idleStatusIcon?.isHidden = inProgress
+            if !inProgress { self.translationProgressLabel?.stringValue = self.l("Ready") }
             if inProgress {
                 indicator?.startAnimation(nil)
             } else {
@@ -1056,7 +1047,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         info.titleVisibility = .hidden
         info.titlebarAppearsTransparent = true
         info.backgroundColor = WidgetStyle.background
-        info.appearance = NSAppearance(named: .darkAqua)
+        info.appearance = NSAppearance(named: .aqua)
         info.isMovableByWindowBackground = true
         info.isReleasedWhenClosed = false
         info.delegate = self
@@ -1139,7 +1130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         win.isReleasedWhenClosed = false
         win.delegate = self
         win.backgroundColor = WidgetStyle.background
-        win.appearance = NSAppearance(named: .darkAqua)
+        win.appearance = NSAppearance(named: .aqua)
         win.titleVisibility = .hidden
         win.titlebarAppearsTransparent = true
         win.isMovableByWindowBackground = true
@@ -1261,7 +1252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         _ = label(l("seconds"), frame: NSRect(x: 266, y: 85, width: 100, height: 18),
                   size: 11, color: WidgetStyle.secondary)
 
-        let saveButton = NSButton(title: l("Save"), target: self, action: #selector(saveSetup))
+        let saveButton = AccentButton(title: l("Save"), target: self, action: #selector(saveSetup))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
         saveButton.font = WidgetStyle.font(13)
@@ -1526,7 +1517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
         speechButton?.imageHugsTitle = true
         speechButton?.toolTip = isSpeaking ? l("Stop playback") : l("Listen to the text")
         if let speechButton {
-            WidgetStyle.styleSecondaryButton(speechButton, fontSize: 11)
+            WidgetStyle.styleSecondaryButton(speechButton, fontSize: 13)
         }
     }
 
@@ -1619,82 +1610,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
                 languageDirection = "\(Self.displayLanguageLabel(sourceCode)) · \(self.l("original language"))"
             }
 
-            let width: CGFloat = 420
-            let height: CGFloat = 260
+            let width: CGFloat = 580
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 3
+            // Preserve the source paragraph breaks without adding spacing to blank lines.
+            paragraph.paragraphSpacing = 0
+            let readingFont = WidgetStyle.font(16)
+            let measuredText = (translated as NSString).boundingRect(
+                with: NSSize(width: width - 72, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: readingFont, .paragraphStyle: paragraph]
+            )
             let mouse = NSEvent.mouseLocation
             let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main
             let screenFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+            let height = min(max(260, ceil(measuredText.height) + 156), min(520, screenFrame.height - 64))
             var x = mouse.x - width / 2
             var y = mouse.y + 26
             x = min(max(x, screenFrame.minX + 16), screenFrame.maxX - width - 16)
-            if y + height > screenFrame.maxY {
-                y = mouse.y - height - 26
-            }
-            y = min(max(y, screenFrame.minY + 16), screenFrame.maxY - height - 16)
+            if y + height > screenFrame.maxY { y = mouse.y - height - 26 }
+            y = min(max(y, screenFrame.minY + 16), screenFrame.maxY - height - 32)
 
             let panel = NSPanel(
                 contentRect: NSRect(x: x, y: y, width: width, height: height),
-                styleMask: [.borderless, .resizable, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
+                styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
+                backing: .buffered, defer: false
             )
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
+            panel.title = headerTitle
+            panel.titleVisibility = .hidden
+            panel.titlebarAppearsTransparent = true
+            panel.backgroundColor = WidgetStyle.background
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
             panel.hidesOnDeactivate = false
             panel.isMovableByWindowBackground = true
             panel.isReleasedWhenClosed = false
-            panel.minSize = NSSize(width: 350, height: 190)
+            panel.minSize = NSSize(width: 520, height: 240)
+            panel.appearance = NSAppearance(named: .aqua)
+            panel.hasShadow = true
+            panel.delegate = self
 
             let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
             container.autoresizingMask = [.width, .height]
             container.wantsLayer = true
-            container.layer?.cornerRadius = 20
             container.layer?.backgroundColor = WidgetStyle.background.cgColor
-            container.layer?.borderWidth = 1
-            container.layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.12).cgColor
-            container.layer?.shadowColor = NSColor.black.cgColor
-            container.layer?.shadowOpacity = 0.30
-            container.layer?.shadowRadius = 16
-            container.layer?.shadowOffset = CGSize(width: 0, height: -6)
 
-            let resultCard = WidgetStyle.box(NSRect(x: 18, y: 66, width: width - 36, height: height - 130))
-            resultCard.autoresizingMask = [.width, .height]
-            container.addSubview(resultCard)
+            let readingSurface = NSView(frame: NSRect(x: 0, y: 64, width: width, height: height - 140))
+            readingSurface.wantsLayer = true
+            readingSurface.layer?.backgroundColor = WidgetStyle.surface.cgColor
+            readingSurface.autoresizingMask = [.width, .height]
+            container.addSubview(readingSurface)
+            for y in [CGFloat(64), height - 76] {
+                let line = NSBox(frame: NSRect(x: 0, y: y, width: width, height: 1))
+                line.boxType = .separator
+                line.autoresizingMask = y == 64 ? [.width, .maxYMargin] : [.width, .minYMargin]
+                container.addSubview(line)
+            }
 
             let title = NSTextField(labelWithString: headerTitle)
             title.font = WidgetStyle.font(16, weight: .semibold)
             title.textColor = WidgetStyle.text
-            title.frame = NSRect(x: 20, y: height - 39, width: width - 40, height: 23)
+            title.frame = NSRect(x: 84, y: height - 32, width: width - 168, height: 23)
+            title.alignment = .center
             title.autoresizingMask = [.width, .minYMargin]
             container.addSubview(title)
 
             let direction = NSTextField(labelWithString: languageDirection)
-            direction.font = WidgetStyle.font(11, weight: .medium)
+            direction.font = WidgetStyle.font(12, weight: .regular)
             direction.textColor = WidgetStyle.secondary
-            direction.frame = NSRect(x: 20, y: height - 59, width: width - 40, height: 17)
+            direction.frame = NSRect(x: 24, y: height - 57, width: width - 48, height: 20)
+            direction.alignment = .center
             direction.autoresizingMask = [.width, .minYMargin]
             container.addSubview(direction)
 
-            let resultLabel = NSTextField(labelWithString: self.l("RESULT"))
-            resultLabel.font = WidgetStyle.font(10, weight: .semibold)
-            resultLabel.textColor = WidgetStyle.secondary
-            resultLabel.frame = NSRect(x: 32, y: height - 91, width: width - 64, height: 16)
-            resultLabel.autoresizingMask = [.width, .minYMargin]
-            container.addSubview(resultLabel)
-
-            let scroll = NSScrollView(frame: NSRect(x: 28, y: 78, width: width - 56, height: height - 176))
+            let scroll = NSScrollView(frame: NSRect(x: 28, y: 80, width: width - 56, height: height - 172))
             scroll.autoresizingMask = [.width, .height]
             scroll.hasVerticalScroller = true
             scroll.borderType = .noBorder
             scroll.drawsBackground = false
             let textView = NSTextView(frame: scroll.bounds)
-            textView.autoresizingMask = [.width, .height]
+            textView.autoresizingMask = [.width]
+            textView.isVerticallyResizable = true
+            textView.isHorizontallyResizable = false
+            textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            textView.textContainer?.widthTracksTextView = true
+            textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
             textView.isEditable = false
             textView.isSelectable = true
             textView.drawsBackground = false
-            textView.font = WidgetStyle.font(14)
+            textView.font = readingFont
+            textView.defaultParagraphStyle = paragraph
             textView.textColor = WidgetStyle.text
             textView.string = translated
             textView.textContainerInset = NSSize(width: 4, height: 4)
@@ -1703,37 +1708,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
 
             let readButton = NSButton(title: self.l("Listen"), target: self, action: #selector(self.toggleSpeakTranslation))
             readButton.bezelStyle = .rounded
-            readButton.font = WidgetStyle.font(11)
-            readButton.frame = NSRect(x: width - 290, y: 18, width: 86, height: 32)
-            readButton.autoresizingMask = [.minXMargin, .maxYMargin]
+            readButton.font = WidgetStyle.font(13)
+            readButton.frame = NSRect(x: 20, y: 15, width: 142, height: 34)
+            readButton.autoresizingMask = [.maxXMargin, .maxYMargin]
             container.addSubview(readButton)
             self.speechButton = readButton
             self.configureSpeechButton(isSpeaking: false)
 
-            let copyButton = NSButton(title: self.l("Copy"), target: self, action: #selector(self.copyTranslationOverlayText))
+            let copyButton = AccentButton(title: self.l("Copy"), target: self, action: #selector(self.copyTranslationOverlayText))
             copyButton.bezelStyle = .rounded
             copyButton.font = WidgetStyle.font(11)
-            WidgetStyle.styleSecondaryButton(copyButton, fontSize: 11)
             copyButton.toolTip = self.l("Copy all text")
-            copyButton.frame = NSRect(x: width - 196, y: 18, width: 80, height: 32)
+            copyButton.frame = NSRect(x: width - 270, y: 15, width: 124, height: 34)
+            copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+            copyButton.imagePosition = .imageLeft
+            copyButton.imageHugsTitle = true
+            WidgetStyle.stylePrimaryButton(copyButton)
             copyButton.autoresizingMask = [.minXMargin, .maxYMargin]
             container.addSubview(copyButton)
 
             let closeButton = NSButton(title: self.l("Close"), target: self, action: #selector(self.closeTranslationOverlay))
             closeButton.bezelStyle = .rounded
             closeButton.font = WidgetStyle.font(11)
-            WidgetStyle.styleSecondaryButton(closeButton, fontSize: 11)
             closeButton.toolTip = self.l("Close")
-            closeButton.frame = NSRect(x: width - 108, y: 18, width: 84, height: 32)
+            closeButton.frame = NSRect(x: width - 134, y: 15, width: 114, height: 34)
+            WidgetStyle.styleSecondaryButton(closeButton)
             closeButton.autoresizingMask = [.minXMargin, .maxYMargin]
             container.addSubview(closeButton)
-
-            let resizeHandle = OverlayResizeHandle(
-                frame: NSRect(x: width - 25, y: 7, width: 18, height: 18),
-                targetWindow: panel
-            )
-            resizeHandle.autoresizingMask = [.minXMargin, .maxYMargin]
-            container.addSubview(resizeHandle)
 
             panel.contentView = container
             panel.orderFrontRegardless()
@@ -2274,6 +2275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AVSp
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let closingWindow = notification.object as? NSWindow, closingWindow === translationOverlayWindow {
+            closeTranslationOverlay()
+            return
+        }
         if let closingWindow = notification.object as? NSWindow, closingWindow === languageInfoWindow {
             setupWindow?.removeChildWindow(closingWindow)
             languageInfoWindow = nil

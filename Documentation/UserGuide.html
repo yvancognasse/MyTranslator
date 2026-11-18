@@ -36,13 +36,17 @@
     <p>The two language lists show the 22 distinct languages supported by Apple Translation on this Mac. Regional variants are grouped, including Chinese as one entry. The languages are Arabic, Chinese, Danish, Dutch, English, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Norwegian Bokmål, Polish, Portuguese, Russian, Spanish, Swedish, Thai, Turkish, Ukrainian, and Vietnamese.</p>
     <p>Some languages still need an offline pack. The Languages information panel explains this requirement. Open Apple's Translate app and download a language before using it in MyTranslator, then reopen Settings. On this Mac, Arabic, Hindi, Indonesian, Polish, Russian, Thai, and Ukrainian currently need a download. The actual installed packs can change over time.</p>
 
+    <h2>Main window</h2>
+    <p>The light macOS interface shows a Ready status, a reminder to select text in your application, and your saved Primary and Other languages. Two reference cards display Translate and Improve with their configured keyboard shortcuts. These cards are reminders: select text in another application and use the shortcut there. Text processing stays local on your Mac.</p>
+    <p>While a translation or improvement is running, the status changes to Translating or Improving and a progress indicator appears. The Dock icon also reflects work in progress.</p>
+
     <h2>Settings</h2>
     <p>Choose the two languages, record the Improve and Translate shortcuts by clicking their fields, and set the maximum wait time (3–300 seconds). Click <strong>Save</strong> to apply the changes immediately. Click <strong>Cancel</strong> to leave them unchanged. The information button beside Languages explains how to download offline language packs.</p>
     <p>The main window has three compact buttons, from left to right: Settings, Quit, and Hide. Hide minimizes the window while MyTranslator continues running; reopen it from the Dock. Quit ends the app completely, just like Quit MyTranslator in the app menu. Closing a window keeps the app running. In Settings, Save applies changes and Cancel discards them.</p>
     <p>Choose About MyTranslator from the app menu to see the build number followed by the date of the most recent build in parentheses. The date uses the saved Primary language.</p>
 
     <h2>Results and privacy</h2>
-    <p>The result window lets you listen to a result, copy all its text, or close the window. The app shows progress by changing its Dock icon while it works. Translation uses Apple's local Translation framework and downloaded languages. Improve uses Apple Foundation Models on supported Macs. The selected text is processed on the Mac by these system frameworks.</p>
+    <p>The content-sized, resizable result window displays the operation and language direction above a high-contrast reading area. Short results open in a compact panel; longer results grow up to a capped height, then scroll vertically. Text wraps to the window width and keeps its original paragraph breaks without extra blank-line spacing. The native title bar supports moving, resizing, and closing the result. Use Listen for speech playback, the blue Copy button to copy all text, or Close to dismiss the result. The app shows progress by changing its Dock icon while it works. Translation uses Apple's local Translation framework and downloaded languages. Improve uses Apple Foundation Models on supported Macs. The selected text is processed on the Mac by these system frameworks.</p>
 
     <h2>Troubleshooting</h2>
     <ul>
@@ -59,6 +63,9 @@
 
     <h2>What's new in this build</h2>
     <ul>
+      <li>Redesigned the main window with a light native macOS appearance, clear language summaries, readable shortcut cards, local-processing information, and a visible Ready or working status.</li>
+      <li>Refined the result window with a native title bar, a height adapted to its text, balanced 16-point type, preserved paragraph breaks, vertical scrolling, and a blue Copy action beside Listen and Close. Primary actions include keyboard focus feedback and stay visible when a floating result is shown over another app. Settings and language information use the matching light appearance.</li>
+      <li>Added the new interface messages in every supported interface language. Translation, improvement, configured shortcuts, and selection replacement behavior are unchanged.</li>
       <li>Restored the earlier application behavior and removed the November shortcut, selection replacement and clipboard changes.</li>
       <li>About MyTranslator now shows the latest build date in parentheses beside the build number, formatted in the saved Primary language.</li>
       <li>The main window now places the gray Quit button between Settings and the blue Hide button. Quit closes the application completely; Hide still only minimizes the window.</li>
